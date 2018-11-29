@@ -6,7 +6,7 @@ import Control.Monad.Aff.Class (liftAff)
 import Control.Monad.Eff.Exception (Error, error)
 import Control.Monad.Error.Class (throwError, catchJust)
 import Control.Monad.Trans.Class (lift)
-import Data.Argonaut (fromObject, fromString)
+import Data.Argonaut (Json, fromArray, fromObject, fromString)
 import Data.Array (cons, find)
 import Data.Either (Either(..))
 import Data.HTTP.Method (Method(..))
@@ -24,7 +24,7 @@ import Network.HTTP.StatusCode (StatusCode(..))
 import Perspectives.Couchdb (CouchdbStatusCodes, DatabaseName, PostCouchdb_session, User, Password, onAccepted', onAccepted, DBS)
 import Perspectives.CouchdbState (MonadCouchdb, sessionCookie, setSessionCookie, takeSessionCookieValue)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
-import Prelude (Unit, bind, const, pure, unit, void, ($), (*>), (/=), (<<<), (<>), (==), (>>=))
+import Prelude (Unit, bind, const, pure, unit, void, ($), (*>), (/=), (<<<), (<>), (==), (>>=), (<$>))
 
 type ID = String
 type AjaxAvar e = (avar :: AVAR, ajax :: AJAX | e)
@@ -143,6 +143,47 @@ deleteDatabase dbname = ensureAuthentication do
     deleteStatusCodes = insert 412 "Precondition failed. Database does not exist."
       databaseStatusCodes
 
+-----------------------------------------------------------
+-- CREATE, DELETE, USER
+-----------------------------------------------------------
+-- | Create a non-admin user.
+createUser :: forall e f. User -> Password -> Array Role -> MonadCouchdb (AjaxAvar e) f Unit
+createUser user password roles = ensureAuthentication do
+  base <- getCouchdbBaseURL
+  (rq :: (AffjaxRequest Unit)) <- defaultPerspectRequest
+  content <- pure (fromObject (StrMap.fromFoldable
+    [ Tuple "name" (fromString user)
+    , Tuple "password" (fromString password)
+    , Tuple "roles" (fromArray (fromString <$> roles))
+    , Tuple "type" (fromString "user")]))
+  (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.affjax $ rq {method = Left PUT, url = (base <> "_users/org.couchdb.user:" <> user), content = Just content}
+  liftAff $ onAccepted res.status [200] "createUser" $ pure unit
+
+type Role = String
+
+-----------------------------------------------------------
+-- SET SECURITY DOCUMENT
+-----------------------------------------------------------
+-- | Set the security document in the database.
+setSecurityDocument :: forall e f. DatabaseName -> Json -> MonadCouchdb (AjaxAvar e) f Unit
+setSecurityDocument db doc = ensureAuthentication do
+  base <- getCouchdbBaseURL
+  (rq :: (AffjaxRequest Unit)) <- defaultPerspectRequest
+  (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.affjax $ rq {method = Left PUT, url = (base <> db <> "_security"), content = Just doc}
+  liftAff $ onAccepted res.status [200] "setSecurityDocument" $ pure unit
+
+-----------------------------------------------------------
+-- SET DESIGN DOCUMENT
+-----------------------------------------------------------
+-- | Set the design document in the database.
+setDesignDocument :: forall e f. DatabaseName -> DocumentName -> Json -> MonadCouchdb (AjaxAvar e) f Unit
+setDesignDocument db docname doc = ensureAuthentication do
+  base <- getCouchdbBaseURL
+  (rq :: (AffjaxRequest Unit)) <- defaultPerspectRequest
+  (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.affjax $ rq {method = Left PUT, url = (base <> db <> "_design/" <> docname), content = Just doc}
+  liftAff $ onAccepted res.status [200] "setDesignDocument" $ pure unit
+
+type DocumentName = String
 -----------------------------------------------------------
 -- ALLDBS
 -----------------------------------------------------------
