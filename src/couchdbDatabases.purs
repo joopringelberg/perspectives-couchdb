@@ -22,7 +22,7 @@ import Network.HTTP.RequestHeader (RequestHeader(..))
 import Network.HTTP.ResponseHeader (ResponseHeader, responseHeaderName, responseHeaderValue)
 import Network.HTTP.StatusCode (StatusCode(..))
 import Perspectives.Couchdb (CouchdbStatusCodes, DatabaseName, PostCouchdb_session, User, Password, onAccepted', onAccepted, DBS)
-import Perspectives.CouchdbState (MonadCouchdb, sessionCookie, setSessionCookie, takeSessionCookieValue)
+import Perspectives.CouchdbState (MonadCouchdb, sessionCookie, setSessionCookie, takeSessionCookieValue, tryReadSessionCookieValue)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
 import Prelude (Unit, bind, const, pure, unit, void, ($), (*>), (/=), (<<<), (<>), (==), (>>=), (<$>))
 
@@ -32,14 +32,17 @@ type AjaxAvar e = (avar :: AVAR, ajax :: AJAX | e)
 -----------------------------------------------------------
 -- QUALIFYREQUEST
 -----------------------------------------------------------
--- | On the browser, do nothing; otherwise add a Cookie header containing the cached cookie. This is a synchronous function.
+-- | Does not modify the request when:
+-- |  * the sessionCookie AVar is empty;
+-- |  * the value of the sessionCookie AVar is "Browser" (we don't do Authentication Cookies on the browser, as it
+-- |    handles them itself.)
+-- | Otherwise, adds a Cookie header containing the cached cookie. This is a synchronous function.
 qualifyRequest :: forall e f a. AffjaxRequest a -> MonadCouchdb (avar :: AVAR | e) f (AffjaxRequest a)
 qualifyRequest req@{headers} = do
   -- cookie <- tryReadSessionCookieValue
   cookie <- pure Nothing
   case cookie of
-    (Just x) | x /= "Browser" -> pure req
-    (Just ck) -> pure $ req {headers = cons (RequestHeader "Cookie" ck) headers}
+    (Just x) | x /= "Browser" -> pure $ req {headers = cons (RequestHeader "Cookie" x) headers}
     otherwise -> pure req
 
 defaultPerspectRequest :: forall e f. MonadCouchdb (avar :: AVAR | e) f (AffjaxRequest Unit)
@@ -102,8 +105,8 @@ ensureAuthentication :: forall e f a. MonadCouchdb (AjaxAvar e) f a -> MonadCouc
 ensureAuthentication a = do
   b <- (sessionCookie >>= lift <<< isEmptyVar)
   if b
-    then (authenticate *> a)
-    else (catchJust predicate a (const (authenticate *> a)))
+    then (authenticate *> a) -- If empty, run authenticate and then run a.
+    else (catchJust predicate a (const (authenticate *> a))) -- Otherwise, try a. When we then happen to be unauthenticated (cookie expired), run authenticate, then run a.
   where
     predicate :: Error -> Maybe Unit
     predicate e = if message e == "UNAUTHORIZED" then Just unit else Nothing
@@ -157,7 +160,7 @@ createUser user password roles = ensureAuthentication do
     , Tuple "roles" (fromArray (fromString <$> roles))
     , Tuple "type" (fromString "user")]))
   (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.affjax $ rq {method = Left PUT, url = (base <> "_users/org.couchdb.user:" <> user), content = Just content}
-  liftAff $ onAccepted res.status [200] "createUser" $ pure unit
+  liftAff $ onAccepted res.status [201] "createUser" $ pure unit
 
 type Role = String
 
@@ -169,8 +172,8 @@ setSecurityDocument :: forall e f. DatabaseName -> Json -> MonadCouchdb (AjaxAva
 setSecurityDocument db doc = ensureAuthentication do
   base <- getCouchdbBaseURL
   (rq :: (AffjaxRequest Unit)) <- defaultPerspectRequest
-  (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.affjax $ rq {method = Left PUT, url = (base <> db <> "_security"), content = Just doc}
-  liftAff $ onAccepted res.status [200] "setSecurityDocument" $ pure unit
+  (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.affjax $ rq {method = Left PUT, url = (base <> db <> "/_security"), content = Just doc}
+  liftAff $ onAccepted res.status [200, 201, 202] "setSecurityDocument" $ pure unit
 
 -----------------------------------------------------------
 -- SET DESIGN DOCUMENT
@@ -180,8 +183,8 @@ setDesignDocument :: forall e f. DatabaseName -> DocumentName -> Json -> MonadCo
 setDesignDocument db docname doc = ensureAuthentication do
   base <- getCouchdbBaseURL
   (rq :: (AffjaxRequest Unit)) <- defaultPerspectRequest
-  (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.affjax $ rq {method = Left PUT, url = (base <> db <> "_design/" <> docname), content = Just doc}
-  liftAff $ onAccepted res.status [200] "setDesignDocument" $ pure unit
+  (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.affjax $ rq {method = Left PUT, url = (base <> db <> "/_design/" <> docname), content = Just doc}
+  liftAff $ onAccepted res.status [200, 201, 202] "setDesignDocument" $ pure unit
 
 type DocumentName = String
 -----------------------------------------------------------
