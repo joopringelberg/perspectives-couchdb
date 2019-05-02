@@ -5,10 +5,10 @@ module Perspectives.CouchdbState where
 -----------------------------------------------------------
 import Prelude
 
-import Control.Monad.Aff (Aff)
-import Control.Monad.Aff.AVar (putVar, readVar, takeVar, tryReadVar)
+import Effect.Aff (Aff)
+import Effect.Aff.AVar (put, read, take, tryRead)
 import Control.Monad.AvarMonadAsk (gets, modify)
-import Control.Monad.Eff.AVar (AVAR, AVar)
+import Effect.AVar (AVar)
 import Control.Monad.Reader (ReaderT, lift)
 import Data.Maybe (Maybe)
 
@@ -31,28 +31,28 @@ type CouchdbState f =
   | f
   }
 
-type MonadCouchdb e f = ReaderT (AVar (CouchdbState f)) (Aff e)
+type MonadCouchdb f = ReaderT (AVar (CouchdbState f)) Aff
 
 -----------------------------------------------------------
 -- FUNCTIONS THAT GET OR MODIFY PARTS OF PERSPECTIVESSTATE
 -----------------------------------------------------------
-couchdbSessionStarted :: forall e f. MonadCouchdb (avar :: AVAR | e) f Boolean
+couchdbSessionStarted :: forall f. MonadCouchdb f Boolean
 couchdbSessionStarted = gets _.couchdbSessionStarted
 
-setCouchdbSessionStarted :: forall e f. Boolean -> MonadCouchdb (avar :: AVAR | e) f Unit
+setCouchdbSessionStarted :: forall f. Boolean -> MonadCouchdb f Unit
 setCouchdbSessionStarted b = modify \ps -> ps {couchdbSessionStarted = b}
 
-sessionCookie :: forall e f. MonadCouchdb (avar :: AVAR | e) f (AVar String)
+sessionCookie :: forall f. MonadCouchdb f (AVar String)
 sessionCookie = gets _.sessionCookie
 
-takeSessionCookieValue :: forall e f. MonadCouchdb (avar :: AVAR | e) f String
-takeSessionCookieValue = gets _.sessionCookie >>= lift <<< takeVar
+takeSessionCookieValue :: forall f. MonadCouchdb f String
+takeSessionCookieValue = gets _.sessionCookie >>= lift <<< take
 
-readSessionCookieValue :: forall e f. MonadCouchdb (avar :: AVAR | e) f String
-readSessionCookieValue = gets _.sessionCookie >>= lift <<< readVar
+readSessionCookieValue :: forall f. MonadCouchdb f String
+readSessionCookieValue = gets _.sessionCookie >>= lift <<< read
 
-tryReadSessionCookieValue :: forall e f. MonadCouchdb (avar :: AVAR | e) f (Maybe String)
-tryReadSessionCookieValue = gets _.sessionCookie >>= lift <<< tryReadVar
+tryReadSessionCookieValue :: forall f. MonadCouchdb f (Maybe String)
+tryReadSessionCookieValue = gets _.sessionCookie >>= lift <<< tryRead
 
-setSessionCookie :: forall e f. String -> MonadCouchdb (avar :: AVAR | e) f Unit
-setSessionCookie c = sessionCookie >>= (lift <<< putVar c)
+setSessionCookie :: forall f. String -> MonadCouchdb f Unit
+setSessionCookie c = sessionCookie >>= (lift <<< put c)

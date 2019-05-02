@@ -1,18 +1,17 @@
 module Perspectives.Couchdb where
 
-import Control.Monad.Eff.Exception (Error, error)
+import Effect.Exception (Error, error)
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Data.Array (elemIndex)
-import Data.Foreign.Class (class Decode)
-import Data.Foreign.Generic (defaultOptions, genericDecode)
+import Foreign.Class (class Decode)
+import Foreign.Generic (defaultOptions, genericDecode)
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map, fromFoldable, lookup)
 import Data.Maybe (Maybe(..))
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype)
 import Data.Tuple (Tuple(..))
-import Network.HTTP.Affjax.Response (class Respondable, ResponseType(..))
-import Network.HTTP.StatusCode (StatusCode(..))
+import Affjax.StatusCode (StatusCode(..))
 import Prelude (show, ($), (<>), (==))
 
 -----------------------------------------------------------
@@ -39,9 +38,8 @@ derive instance genericPutCouchdbDocument :: Generic PutCouchdbDocument _
 
 derive instance newtypePutCouchdbDocument :: Newtype PutCouchdbDocument _
 
-instance respondablePutCouchdbDocument :: Respondable PutCouchdbDocument where
-  responseType = Tuple Nothing JSONResponse
-  fromResponse = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+instance decodePutCouchdbDocument :: Decode PutCouchdbDocument where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
 -----------------------------------------------------------
 -- DBS
@@ -49,9 +47,8 @@ instance respondablePutCouchdbDocument :: Respondable PutCouchdbDocument where
 newtype DBS = DBS (Array String)
 derive instance genericDBS :: Generic DBS _
 derive instance newtypeDBS :: Newtype DBS _
-instance respondableDBS :: Respondable DBS where
-  responseType = Tuple Nothing JSONResponse
-  fromResponse = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+instance decodeDBS :: Decode DBS where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
 -----------------------------------------------------------
 -- DB
@@ -66,9 +63,8 @@ newtype GetCouchdbAllDocs = GetCouchdbAllDocs
 derive instance genericCouchdbAllDocs :: Generic GetCouchdbAllDocs _
 derive instance newtypeCouchdbAllDocs :: Newtype GetCouchdbAllDocs _
 
-instance respondableGetCouchdbAllDocs :: Respondable GetCouchdbAllDocs where
-  responseType = Tuple Nothing JSONResponse
-  fromResponse = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+instance decodeGetCouchdbAllDocs :: Decode GetCouchdbAllDocs where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
 newtype DocReference = DocReference { id :: String, value :: Rev}
 
@@ -95,9 +91,8 @@ newtype PostCouchdb_session = PostCouchdb_session
 
 derive instance genericPostCouchdb_session :: Generic PostCouchdb_session _
 derive instance newtypePostCouchdb_session :: Newtype PostCouchdb_session _
-instance respondablePostCouchdb_session :: Respondable PostCouchdb_session where
-  responseType = Tuple Nothing JSONResponse
-  fromResponse = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+instance decodePostCouchdb_session :: Decode PostCouchdb_session where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
 -----------------------------------------------------------
 -- STATUS CODES

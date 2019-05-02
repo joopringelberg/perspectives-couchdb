@@ -1,6 +1,6 @@
 {
   "name": "perspectives-couchdb",
-  "set": "psc-0.11.7-perspectives-core",
+  "set": "psc-12.5-perspectives",
   "source": "https://github.com/joopringelberg/package-sets.git",
   "depends": [
     "prelude",
