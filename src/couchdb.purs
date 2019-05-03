@@ -1,18 +1,22 @@
 module Perspectives.Couchdb where
 
-import Effect.Exception (Error, error)
+import Affjax (ResponseFormatError, printResponseFormatError)
+import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Error.Class (class MonadError, throwError)
+import Control.Monad.Except (runExcept)
 import Data.Array (elemIndex)
-import Foreign.Class (class Decode)
-import Foreign.Generic (defaultOptions, genericDecode)
+import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Map (Map, fromFoldable, lookup)
 import Data.Maybe (Maybe(..))
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype)
 import Data.Tuple (Tuple(..))
-import Affjax.StatusCode (StatusCode(..))
-import Prelude (show, ($), (<>), (==))
+import Effect.Exception (Error, error)
+import Foreign (MultipleErrors)
+import Foreign.Class (class Decode)
+import Foreign.Generic (decodeJSON, defaultOptions, genericDecode)
+import Prelude (Unit, show, ($), (<>), (==), bind, pure, (*>))
 
 -----------------------------------------------------------
 -- ALIASES
@@ -157,3 +161,11 @@ handleError n statusCodes fname =
           case lookup n couchdDBStatusCodes of
             (Just m) -> throwError $ error $  "Failure in " <> fname <> ". " <> m
             Nothing -> throwError $ error $ "Failure in " <> fname <> ". " <> "Unknown HTTP statuscode " <> show n
+
+onCorrectCallAndResponse :: forall a m. MonadError Error m => Decode a => Either ResponseFormatError String -> (a -> m Unit) -> m a
+onCorrectCallAndResponse (Left e) _ = throwError $ error ("createDomeinFileInCouchdb: error in call: " <> printResponseFormatError e)
+onCorrectCallAndResponse (Right r) f = do
+  (x :: Either MultipleErrors a) <- pure $ runExcept (decodeJSON r)
+  case x of
+    (Left e) -> throwError $ error ("createDomeinFileInCouchdb: error in decoding result: " <> show e)
+    (Right result) -> f result *> pure result
