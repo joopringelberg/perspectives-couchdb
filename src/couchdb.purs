@@ -41,6 +41,18 @@ derive instance newtypePutCouchdbDocument :: Newtype PutCouchdbDocument _
 instance decodePutCouchdbDocument :: Decode PutCouchdbDocument where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
+newtype DeleteCouchdbDocument = DeleteCouchdbDocument
+  { ok :: Maybe Boolean
+  , id :: Maybe String
+  , rev :: Maybe String}
+
+derive instance genericDeleteCouchdbDocument :: Generic DeleteCouchdbDocument _
+
+derive instance newtypeDeleteCouchdbDocument :: Newtype DeleteCouchdbDocument _
+
+instance decodeDeleteCouchdbDocument :: Decode DeleteCouchdbDocument where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+
 -----------------------------------------------------------
 -- DBS
 -----------------------------------------------------------
