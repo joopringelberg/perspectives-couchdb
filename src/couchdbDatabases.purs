@@ -17,7 +17,7 @@ import Data.HTTP.Method (Method(..))
 import Data.Map (fromFoldable, insert)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (unwrap)
-import Data.String (Pattern(..), stripPrefix, stripSuffix)
+import Data.String (Pattern(..), stripPrefix, stripSuffix, toLower)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (message)
 import Effect.Aff.AVar (status, isEmpty, read)
@@ -99,7 +99,7 @@ requestAuthentication' usr pwd = do
   where
   -- In the browser, the cookie header is hidden from our code: the browser handles it by itself.
   saveCookie :: Array ResponseHeader -> MonadCouchdb f Unit
-  saveCookie headers = case find (\rh -> (name rh) == "Set-Cookie") headers of
+  saveCookie headers = case find (\rh -> toLower (name rh) == "set-cookie") headers of
     Nothing -> do
       setSessionCookie "Browser"
     (Just h) -> do
@@ -220,7 +220,7 @@ retrieveDocumentVersion url = do
 
   where
     version :: Array ResponseHeader -> MonadCouchdb f String
-    version headers =  case find (\rh -> (name rh) == "ETag") headers of
+    version headers =  case find (\rh -> toLower (name rh) == "etag") headers of
       Nothing -> throwError $ error ("retrieveDocumentVersion: couchdb returns no ETag header holding a document version number for " <> url)
       (Just h) -> (pure $ value h) >>= removeDoubleQuotes
 
