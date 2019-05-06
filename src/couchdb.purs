@@ -162,10 +162,10 @@ handleError n statusCodes fname =
             (Just m) -> throwError $ error $  "Failure in " <> fname <> ". " <> m
             Nothing -> throwError $ error $ "Failure in " <> fname <> ". " <> "Unknown HTTP statuscode " <> show n
 
-onCorrectCallAndResponse :: forall a m. MonadError Error m => Decode a => Either ResponseFormatError String -> (a -> m Unit) -> m a
-onCorrectCallAndResponse (Left e) _ = throwError $ error ("createDomeinFileInCouchdb: error in call: " <> printResponseFormatError e)
-onCorrectCallAndResponse (Right r) f = do
+onCorrectCallAndResponse :: forall a m. MonadError Error m => Decode a => String -> Either ResponseFormatError String -> (a -> m Unit) -> m a
+onCorrectCallAndResponse n (Left e) _ = throwError $ error (n <> ": error in call: " <> printResponseFormatError e)
+onCorrectCallAndResponse n (Right r) f = do
   (x :: Either MultipleErrors a) <- pure $ runExcept (decodeJSON r)
   case x of
-    (Left e) -> throwError $ error ("createDomeinFileInCouchdb: error in decoding result: " <> show e)
+    (Left e) -> throwError $ error (n <> ": error in decoding result: " <> show e)
     (Right result) -> f result *> pure result
