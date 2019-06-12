@@ -11,6 +11,7 @@ import Data.Map (Map, fromFoldable, lookup)
 import Data.Maybe (Maybe(..))
 import Data.Monoid (mempty)
 import Data.Newtype (class Newtype)
+import Data.String (Pattern(..), Replacement(..), replaceAll)
 import Data.Tuple (Tuple(..))
 import Effect.Exception (Error, error)
 import Foreign (MultipleErrors)
@@ -169,3 +170,6 @@ onCorrectCallAndResponse n (Right r) f = do
   case x of
     (Left e) -> throwError $ error (n <> ": error in decoding result: " <> show e)
     (Right result) -> f result *> pure result
+
+escapeCouchdbDocumentName :: String -> String
+escapeCouchdbDocumentName s = replaceAll (Pattern ":") (Replacement "%3A") (replaceAll (Pattern "$") (Replacement "%24") s)

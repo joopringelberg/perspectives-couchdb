@@ -8,6 +8,7 @@
     "foreign-generic",
     "argonaut",
     "avar-monadask",
-    "aff-promise"
+    "aff-promise",
+    "test-unit"
   ]
 }
