@@ -1,0 +1,21 @@
+{
+  "name": "perspectives-couchdb",
+  "version": "1.0.0",
+  "description": "Accessing Couchdb from Purescript",
+  "private": true,
+  "author": "Joop Ringelberg <joop.ringelberg@gmail.com>",
+  "license": "Copyright Perspect-IT 2019",
+  "dependencies": {
+    "xhr2-cookies": "^1.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joopringelberg/perspectives-couchdb.git"
+  },
+  "main": "dist/perspectives-couchdb.js",
+  "homepage": "https://github.com/joopringelberg/perspectives-couchdb#readme",
+  "scripts": {
+    "build": "pulp browserify --standalone PerspectivesCouchdb --to dist/perspectives-couchdb.js"
+  },
+  "devDependencies": {}
+}

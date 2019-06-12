@@ -5,12 +5,12 @@ module Perspectives.CouchdbState where
 -----------------------------------------------------------
 import Prelude
 
-import Effect.Aff (Aff)
-import Effect.Aff.AVar (put, read, take, tryRead)
 import Control.Monad.AvarMonadAsk (gets, modify)
-import Effect.AVar (AVar)
-import Control.Monad.Reader (ReaderT, lift)
+import Control.Monad.Reader (ReaderT, lift, runReaderT)
 import Data.Maybe (Maybe)
+import Effect.AVar (AVar)
+import Effect.Aff (Aff)
+import Effect.Aff.AVar (put, read, take, tryRead, new)
 
 -----------------------------------------------------------
 -- USERINFO
@@ -32,6 +32,21 @@ type CouchdbState f =
   }
 
 type MonadCouchdb f = ReaderT (AVar (CouchdbState f)) Aff
+
+-- | Run an action in MonadCouchdb, given a username and password.
+runMonadCouchdb :: forall a. String -> String -> MonadCouchdb () a
+  -> Aff a
+runMonadCouchdb userName password mp = do
+  (av :: AVar String) <- new "This value will be removed on first authentication!"
+  (rf :: AVar (CouchdbState ())) <- new $
+    { userInfo:
+      { userName: userName
+      , couchdbPassword: password
+      , couchdbBaseURL: "http://127.0.0.1:5984/" }
+    , couchdbSessionStarted: false
+    , sessionCookie: av
+  }
+  runReaderT mp rf
 
 -----------------------------------------------------------
 -- FUNCTIONS THAT GET OR MODIFY PARTS OF PERSPECTIVESSTATE

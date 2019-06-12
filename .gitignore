@@ -3,3 +3,4 @@
 /.psc*
 /.purs*
 /.psa*
+/node_modules/

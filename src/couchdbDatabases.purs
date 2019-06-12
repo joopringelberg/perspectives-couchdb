@@ -16,6 +16,7 @@ import Data.Either (Either(..))
 import Data.HTTP.Method (Method(..))
 import Data.Map (fromFoldable, insert)
 import Data.Maybe (Maybe(..))
+import Data.MediaType (MediaType)
 import Data.Newtype (unwrap)
 import Data.String (Pattern(..), stripPrefix, stripSuffix, toLower)
 import Data.Tuple (Tuple(..))
@@ -26,7 +27,7 @@ import Effect.Exception (Error, error)
 import Foreign (MultipleErrors)
 import Foreign.Generic (decodeJSON)
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DatabaseName, User, Password, onAccepted', onAccepted, DBS)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, Password, User, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.CouchdbState (MonadCouchdb, sessionCookie, setSessionCookie, takeSessionCookieValue)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
 import Prelude (Unit, bind, const, pure, show, unit, void, ($), (*>), (/=), (<$>), (<<<), (<>), (==), (>>=))
@@ -234,3 +235,21 @@ retrieveDocumentVersion url = do
           case ms2 of
             Nothing -> throwError $ error ("retrieveDocumentVersion: couchdb returns ETag value that is not a double quoted string for " <> url)
             (Just s2) -> pure s2
+
+-----------------------------------------------------------
+-- ADD ATTACHMENT
+-----------------------------------------------------------
+addAttachment :: forall f. ID -> String -> String -> MediaType -> MonadCouchdb f DeleteCouchdbDocument
+addAttachment docPath attachmentName attachment mimetype = do
+  base <- getCouchdbBaseURL
+  (rq@({headers}) :: (AJ.Request String)) <- defaultPerspectRequest
+  rev <- retrieveDocumentVersion docPath
+  res <- liftAff $ AJ.request $ rq
+    { method = Left PUT
+    , url = docPath <> "/" <> attachmentName <> "?_rev=" <> rev
+    , headers = cons (ContentType mimetype) headers
+    , content = Just (RequestBody.string attachment)
+    }
+  onAccepted res.status [200, 202] "addAttachment"
+      (onCorrectCallAndResponse "addAttachment" res.body \(a :: DeleteCouchdbDocument)-> pure unit)
+  -- For uploading attachments, the same structure is returned as for deleting a document.
