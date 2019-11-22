@@ -210,6 +210,18 @@ allDbs = do
         (Right dbs) -> pure $ unwrap dbs
 
 -----------------------------------------------------------
+-- DOCUMENT EXISTS
+-----------------------------------------------------------
+documentExists :: forall f. ID -> MonadCouchdb f Boolean
+documentExists url = do
+  (rq :: (AJ.Request String)) <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {method = Left HEAD, url = url}
+  case res.status of
+    StatusCode 200 -> pure true
+    StatusCode 304 -> pure true
+    otherwise -> pure false
+
+-----------------------------------------------------------
 -- DOCUMENT VERSION
 -----------------------------------------------------------
 retrieveDocumentVersion :: forall f. ID -> MonadCouchdb f String

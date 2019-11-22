@@ -1,4 +1,4 @@
-module Main (addAttachment) where
+module MainCouchdb (addAttachment) where
 
 import Control.Promise (Promise, fromAff)
 import Data.MediaType (MediaType(..))
