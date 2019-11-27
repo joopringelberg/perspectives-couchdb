@@ -11,7 +11,7 @@ import Test.Unit (TestF, suite, suiteSkip, test, testOnly, testSkip)
 import Test.Utils (assertEqual)
 
 theSuite :: Free TestF Unit
-theSuite = suite "addAttachment" do
+theSuite = suiteSkip "addAttachment" do
   test "attach test.js to model:Perspectives" do
     assertEqual "We should be able to attach an attachment to model:Perspectives"
       ((addAttachment "perspect_models/model:Perspectives" "test.js" "function(){return 'hello world';}" (MediaType "text/ecmascript")) >>= \(DeleteCouchdbDocument {ok}) -> pure ok)

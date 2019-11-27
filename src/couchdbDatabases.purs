@@ -7,7 +7,7 @@ import Affjax.RequestHeader (RequestHeader(..))
 import Affjax.ResponseFormat as ResponseFormat
 import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
-import Control.Monad.Error.Class (throwError, catchJust)
+import Control.Monad.Error.Class (class MonadError, catchJust, throwError)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut (Json, fromArray, fromObject, fromString)
@@ -18,7 +18,7 @@ import Data.Map (fromFoldable, insert)
 import Data.Maybe (Maybe(..))
 import Data.MediaType (MediaType)
 import Data.Newtype (unwrap)
-import Data.String (Pattern(..), stripPrefix, stripSuffix, toLower)
+import Data.String (toLower)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (message)
 import Effect.Aff.AVar (status, isEmpty, read)
@@ -224,7 +224,7 @@ documentExists url = do
 -----------------------------------------------------------
 -- DOCUMENT VERSION
 -----------------------------------------------------------
-retrieveDocumentVersion :: forall f. ID -> MonadCouchdb f String
+retrieveDocumentVersion :: forall f. ID -> MonadCouchdb f (Maybe String)
 retrieveDocumentVersion url = do
   (rq :: (AJ.Request String)) <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left HEAD, url = url}
@@ -233,23 +233,6 @@ retrieveDocumentVersion url = do
   vs <- version res.headers
   liftAff $ onAccepted res.status [200, 304] "retrieveDocumentVersion" (pure vs)
 
-  where
-    version :: Array ResponseHeader -> MonadCouchdb f String
-    version headers =  case find (\rh -> toLower (name rh) == "etag") headers of
-      Nothing -> throwError $ error ("retrieveDocumentVersion: couchdb returns no ETag header holding a document version number for " <> url)
-      (Just h) -> (pure $ value h) >>= removeDoubleQuotes
-
-    removeDoubleQuotes :: String -> MonadCouchdb f String
-    removeDoubleQuotes s = do
-      ms1 <- pure $ stripPrefix (Pattern "\"") s
-      case ms1 of
-        Nothing -> throwError $ error ("retrieveDocumentVersion: couchdb returns ETag value that is not a valid JSON string for " <> url)
-        (Just s1) -> do
-          ms2 <- pure $ stripSuffix (Pattern "\"") s1
-          case ms2 of
-            Nothing -> throwError $ error ("retrieveDocumentVersion: couchdb returns ETag value that is not a double quoted string for " <> url)
-            (Just s2) -> pure s2
-
 -----------------------------------------------------------
 -- ADD ATTACHMENT
 -----------------------------------------------------------
@@ -257,13 +240,27 @@ addAttachment :: forall f. ID -> String -> String -> MediaType -> MonadCouchdb f
 addAttachment docPath attachmentName attachment mimetype = do
   base <- getCouchdbBaseURL
   (rq@({headers}) :: (AJ.Request String)) <- defaultPerspectRequest
-  rev <- retrieveDocumentVersion  (base <> docPath)
-  res <- liftAff $ AJ.request $ rq
-    { method = Left PUT
-    , url = base <> docPath <> "/" <> escapeCouchdbDocumentName attachmentName <> "?rev=" <> rev
-    , headers = cons (ContentType mimetype) headers
-    , content = Just (RequestBody.string attachment)
-    }
-  onAccepted res.status [200, 201, 202] "addAttachment"
-      (onCorrectCallAndResponse "addAttachment" res.body \(a :: DeleteCouchdbDocument)-> pure unit)
-  -- For uploading attachments, the same structure is returned as for deleting a document.
+  mrev <- retrieveDocumentVersion  (base <> docPath)
+  case mrev of
+    Nothing -> throwError (error "addAttachment needs a document revision string!")
+    Just rev -> do
+      res <- liftAff $ AJ.request $ rq
+        { method = Left PUT
+        , url = base <> docPath <> "/" <> escapeCouchdbDocumentName attachmentName <> "?rev=" <> rev
+        , headers = cons (ContentType mimetype) headers
+        , content = Just (RequestBody.string attachment)
+        }
+      onAccepted res.status [200, 201, 202] "addAttachment"
+          (onCorrectCallAndResponse "addAttachment" res.body \(a :: DeleteCouchdbDocument)-> pure unit)
+      -- For uploading attachments, the same structure is returned as for deleting a document.
+
+-----------------------------------------------------------
+-- VERSION
+-----------------------------------------------------------
+-- | Read the version from the headers.
+version :: forall m. MonadError Error m => Array ResponseHeader -> m (Maybe String)
+version headers =  case find (\rh -> toLower (name rh) == "etag") headers of
+  Nothing -> throwError $ error ("Perspectives.Instances.version: retrieveDocumentVersion: couchdb returns no ETag header holding a document version number")
+  (Just h) -> case runExcept $ decodeJSON (value h) of
+    Left e -> pure Nothing
+    Right v -> pure $ Just v
