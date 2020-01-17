@@ -10,7 +10,7 @@ import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Error.Class (class MonadError, catchJust, throwError)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Trans.Class (lift)
-import Data.Argonaut (Json, fromArray, fromObject, fromString)
+import Data.Argonaut (Json, encodeJson, fromArray, fromObject, fromString)
 import Data.Array (cons, find)
 import Data.Either (Either(..))
 import Data.HTTP.Method (Method(..))
@@ -26,8 +26,9 @@ import Effect.Aff.Class (liftAff)
 import Effect.Exception (Error, error)
 import Foreign (MultipleErrors)
 import Foreign.Generic (decodeJSON)
+import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, Password, User, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), Password, User, View, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.CouchdbState (MonadCouchdb, sessionCookie, setSessionCookie, takeSessionCookieValue)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
 import Prelude (Unit, bind, const, pure, show, unit, void, ($), (*>), (/=), (<$>), (<<<), (<>), (==), (>>=))
@@ -182,17 +183,70 @@ setSecurityDocument db doc = ensureAuthentication do
   liftAff $ onAccepted res.status [200, 201, 202] "setSecurityDocument" $ pure unit
 
 -----------------------------------------------------------
--- SET DESIGN DOCUMENT
+-- GET/SET DESIGN DOCUMENT
 -----------------------------------------------------------
--- | Set the design document in the database.
-setDesignDocument :: forall f. DatabaseName -> DocumentName -> Json -> MonadCouchdb f Unit
-setDesignDocument db docname doc = ensureAuthentication do
+-- | Get the design document from the database.
+getDesignDocument :: forall f. DatabaseName -> DocumentName -> MonadCouchdb f DesignDocument
+getDesignDocument db docname = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
-  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> db <> "/_design/" <> docname), content = Just $ RequestBody.json doc}
+  res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/" <> docname)}
+  liftAff $ onAccepted res.status [200] "getDesignDocument"
+    (onCorrectCallAndResponse "getDesignDocument" res.body \(a :: DesignDocument) -> pure unit)
+
+-- | Set the design document in the database.
+setDesignDocument :: forall f. DatabaseName -> DocumentName -> DesignDocument -> MonadCouchdb f Unit
+setDesignDocument db docname doc@(DesignDocument{_rev}) = ensureAuthentication do
+  base <- getCouchdbBaseURL
+  rev <- pure $ case _rev of
+    Nothing -> ""
+    Just r -> ("?rev=" <> r)
+  rq <- defaultPerspectRequest
+  -- res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> db <> "/_design/" <> docname <> rev), content = Just $ RequestBody.string (unsafeStringify $ encode doc)}
+  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> db <> "/_design/" <> docname <> rev), content = Just $ RequestBody.json (encodeJson doc)}
   liftAff $ onAccepted res.status [200, 201, 202] "setDesignDocument" $ pure unit
 
 type DocumentName = String
+
+-----------------------------------------------------------
+-- VIEW
+-----------------------------------------------------------
+-- | A View is a javascript map function (possibly complemented by a reduce function, not implemented here).
+-- | A View is serialised to a string and stored in a Design Document.
+-- | We present functions here to
+-- |  * create an empty design document with a views section
+-- |  * add and delete a view to a design document
+-- |  * add a view to named design document in a database.
+-- | Obtain a stringified javascript function by importing it from javascript:
+-- |  foreign import mapFunction :: String
+-- | where the javascript module holds:
+-- | exports.mapFunction = (function(x) body).toString()
+
+defaultDesignDocumentWithViewsSection :: String -> DesignDocument
+defaultDesignDocumentWithViewsSection n = DesignDocument
+  { _id: "_design/" <> n
+  , _rev: Nothing
+  , views: OBJ.empty
+}
+
+type ViewName = String
+
+addView :: DesignDocument -> ViewName -> View -> DesignDocument
+addView (DesignDocument r@{views}) name view = DesignDocument r {views = OBJ.insert name view views}
+
+removeView :: DesignDocument -> ViewName -> DesignDocument
+removeView (DesignDocument r@{views}) name = DesignDocument r {views = OBJ.delete name views}
+
+addViewToDatabase :: forall f. DatabaseName -> DocumentName -> ViewName -> View -> MonadCouchdb f Unit
+addViewToDatabase db docname viewname view = do
+  (ddoc :: DesignDocument) <- getDesignDocument db docname
+  setDesignDocument db docname (addView ddoc viewname view)
+
+removeViewFromDatabase :: forall f. DatabaseName -> DocumentName -> ViewName -> MonadCouchdb f Unit
+removeViewFromDatabase db docname viewname = do
+  (ddoc@(DesignDocument{_rev}) :: DesignDocument) <- getDesignDocument db docname
+  setDesignDocument db docname (removeView ddoc viewname)
+
 -----------------------------------------------------------
 -- ALLDBS
 -----------------------------------------------------------
@@ -228,10 +282,10 @@ retrieveDocumentVersion :: forall f. ID -> MonadCouchdb f (Maybe String)
 retrieveDocumentVersion url = do
   (rq :: (AJ.Request String)) <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left HEAD, url = url}
-  -- _ <- log $ show res.headers
-  -- _ <- log $ show res.status
-  vs <- version res.headers
-  liftAff $ onAccepted res.status [200, 304] "retrieveDocumentVersion" (pure vs)
+  case res.status of
+    StatusCode 200 -> version res.headers
+    StatusCode 304 -> version res.headers
+    otherwise -> pure Nothing
 
 -----------------------------------------------------------
 -- ADD ATTACHMENT

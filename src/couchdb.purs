@@ -1,23 +1,28 @@
 module Perspectives.Couchdb where
 
 import Affjax (ResponseFormatError, printResponseFormatError)
+import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.Except (runExcept)
-import Data.Array (elemIndex)
+import Data.Argonaut (class EncodeJson, Json, encodeJson, fromObject, fromString, jsonSingletonObject)
+import Data.Array (elemIndex, find)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
+import Data.Generic.Rep.Eq (genericEq)
+import Data.Generic.Rep.Show (genericShow)
 import Data.Map (Map, fromFoldable, lookup)
 import Data.Maybe (Maybe(..))
 import Data.Monoid (mempty)
-import Data.Newtype (class Newtype)
-import Data.String (Pattern(..), Replacement(..), replaceAll)
+import Data.Newtype (class Newtype, unwrap)
+import Data.String (Pattern(..), Replacement(..), replaceAll, toLower)
 import Data.Tuple (Tuple(..))
 import Effect.Exception (Error, error)
 import Foreign (MultipleErrors)
-import Foreign.Class (class Decode)
-import Foreign.Generic (decodeJSON, defaultOptions, genericDecode)
-import Prelude (Unit, show, ($), (<>), (==), bind, pure, (*>))
+import Foreign.Class (class Decode, class Encode)
+import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode)
+import Foreign.Object (Object, fromFoldable) as OBJ
+import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<<<), (<>), (==), (<$>))
 
 -----------------------------------------------------------
 -- ALIASES
@@ -112,6 +117,70 @@ instance decodePostCouchdb_session :: Decode PostCouchdb_session where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
 -----------------------------------------------------------
+-- DESIGN DOCUMENT
+-----------------------------------------------------------
+-- {
+--     "_id": "_design/application",
+--     "_rev": "1-C1687D17",
+--     "views": {
+--         "viewname": {
+--             "map": "function(doc) { ... }",
+--             "reduce": "function(keys, values) { ... }"
+--         }
+--     }
+-- }
+newtype DesignDocument = DesignDocument
+  { _id :: String
+  , _rev :: Maybe String
+  , views :: OBJ.Object View
+}
+
+newtype View = View
+  { map :: String
+  , reduce :: Maybe String
+}
+
+derive instance genericView :: Generic View _
+derive instance newtypeView :: Newtype View _
+instance decodeView :: Decode View where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+instance encodeView :: Encode View where
+  encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+instance eqView :: Eq View where
+  eq = genericEq
+instance showView :: Show View where
+  show = genericShow
+instance encodeJonView :: EncodeJson View where
+  encodeJson (View{map,reduce}) = case reduce of
+    Nothing -> jsonSingletonObject "map" (fromString map)
+    Just r -> fromObject $ OBJ.fromFoldable
+      [ Tuple "map" (fromString map)
+      , Tuple "reduce" (fromString r)
+      ]
+
+derive instance genericDesignDocument :: Generic DesignDocument _
+derive instance newtypeDesignDocument :: Newtype DesignDocument _
+instance decodeDesignDocument :: Decode DesignDocument where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+instance encodeDesignDocument :: Encode DesignDocument where
+  encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+instance showDesignDocument :: Show DesignDocument where
+  show = genericShow
+instance encodeJonDesignDocument :: EncodeJson DesignDocument where
+  encodeJson (DesignDocument{_id, _rev, views})= case _rev of
+    Nothing -> fromObject $ OBJ.fromFoldable
+      [ Tuple "_id" (fromString _id)
+      , Tuple "views" (fromObject (encodeJson <$> views))
+      ]
+    Just r -> fromObject $ OBJ.fromFoldable
+      [ Tuple "_id" (fromString _id)
+      , Tuple "_rev" (fromString r)
+      , Tuple "views" (fromObject (encodeJson <$> views))
+      ]
+
+designDocumentViews :: DesignDocument -> OBJ.Object View
+designDocumentViews = _.views <<< unwrap
+-----------------------------------------------------------
 -- STATUS CODES
 -----------------------------------------------------------
 
@@ -173,3 +242,10 @@ onCorrectCallAndResponse n (Right r) f = do
 
 escapeCouchdbDocumentName :: String -> String
 escapeCouchdbDocumentName s = replaceAll (Pattern ":") (Replacement "%3A") (replaceAll (Pattern "$") (Replacement "%24") s)
+
+version :: forall m. MonadError Error m => Array ResponseHeader -> m (Maybe String)
+version headers =  case find (\rh -> toLower (name rh) == "etag") headers of
+  Nothing -> throwError $ error ("Perspectives.Instances.version: couchdb returns no ETag header holding a document version number")
+  (Just h) -> case runExcept $ decodeJSON (value h) of
+    Left e -> pure Nothing
+    Right v -> pure $ Just v
