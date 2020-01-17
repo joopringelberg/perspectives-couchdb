@@ -2,10 +2,12 @@ module Test.Couchdb.UploadAttachment (theSuite) where
 
 import Prelude
 
+import Control.Monad.Error.Class (throwError)
 import Control.Monad.Free (Free)
 import Data.Maybe (Maybe(..))
 import Data.MediaType (MediaType(..))
 import Effect.Class.Console (logShow)
+import Effect.Exception (error)
 import Perspectives.Couchdb (DeleteCouchdbDocument(..), View(..), designDocumentViews)
 import Perspectives.Couchdb.Databases (addAttachment, addView, addViewToDatabase, createDatabase, defaultDesignDocumentWithViewsSection, deleteDatabase, getDesignDocument, setDesignDocument)
 import Test.Unit (TestF, suite, suiteSkip, test, testOnly, testSkip)
@@ -26,21 +28,26 @@ theSuite = suite "addAttachment" do
       (do
         createDatabase "testdesigndocument"
         setDesignDocument "testdesigndocument" "defaultViews" (defaultDesignDocumentWithViewsSection "defaultViews")
-        ddoc <- getDesignDocument "testdesigndocument" "defaultViews"
-        logShow ddoc
-        views <- pure $ designDocumentViews ddoc
-        deleteDatabase "testdesigndocument"
-        pure views)
+        mddoc <- getDesignDocument "testdesigndocument" "defaultViews"
+        logShow mddoc
+        case mddoc of
+          Nothing -> throwError (error "No design doc, impossible!")
+          Just ddoc -> do
+            views <- pure $ designDocumentViews ddoc
+            deleteDatabase "testdesigndocument"
+            pure views)
       (designDocumentViews $ defaultDesignDocumentWithViewsSection "defaultViews")
 
-  testOnly "insert view" do
+  test "insert view" do
     assertEqual "The retrieved document should equal the sent document"
       (do
         createDatabase "testdesigndocument"
-        setDesignDocument "testdesigndocument" "defaultViews" (defaultDesignDocumentWithViewsSection "defaultViews")
         addViewToDatabase "testdesigndocument" "defaultViews" "someview" (View {map: someview, reduce: Nothing})
-        ddoc <- getDesignDocument "testdesigndocument" "defaultViews"
-        views <- pure $ designDocumentViews ddoc
-        deleteDatabase "testdesigndocument"
-        pure views)
-      (designDocumentViews  (addView (defaultDesignDocumentWithViewsSection "defaultViews") "someview" (View {map: someview, reduce: Nothing})))
+        mddoc <- getDesignDocument "testdesigndocument" "defaultViews"
+        case mddoc of
+          Nothing -> throwError (error "No design doc, impossible!")
+          Just ddoc -> do
+            views <- pure $ designDocumentViews ddoc
+            deleteDatabase "testdesigndocument"
+            pure views)
+      (designDocumentViews (addView (defaultDesignDocumentWithViewsSection "defaultViews") "someview" (View {map: someview, reduce: Nothing})))

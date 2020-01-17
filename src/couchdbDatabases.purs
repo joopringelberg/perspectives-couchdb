@@ -186,13 +186,14 @@ setSecurityDocument db doc = ensureAuthentication do
 -- GET/SET DESIGN DOCUMENT
 -----------------------------------------------------------
 -- | Get the design document from the database.
-getDesignDocument :: forall f. DatabaseName -> DocumentName -> MonadCouchdb f DesignDocument
+getDesignDocument :: forall f. DatabaseName -> DocumentName -> MonadCouchdb f (Maybe DesignDocument)
 getDesignDocument db docname = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/" <> docname)}
-  liftAff $ onAccepted res.status [200] "getDesignDocument"
-    (onCorrectCallAndResponse "getDesignDocument" res.body \(a :: DesignDocument) -> pure unit)
+  case res.status of
+    StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getDesignDocument" res.body \(a :: DesignDocument) -> pure unit)
+    otherwise -> pure Nothing
 
 -- | Set the design document in the database.
 setDesignDocument :: forall f. DatabaseName -> DocumentName -> DesignDocument -> MonadCouchdb f Unit
@@ -239,13 +240,17 @@ removeView (DesignDocument r@{views}) name = DesignDocument r {views = OBJ.delet
 
 addViewToDatabase :: forall f. DatabaseName -> DocumentName -> ViewName -> View -> MonadCouchdb f Unit
 addViewToDatabase db docname viewname view = do
-  (ddoc :: DesignDocument) <- getDesignDocument db docname
-  setDesignDocument db docname (addView ddoc viewname view)
+  (mddoc :: Maybe DesignDocument) <- getDesignDocument db docname
+  case mddoc of
+    Nothing -> setDesignDocument db docname (addView (defaultDesignDocumentWithViewsSection viewname) viewname view)
+    Just ddoc -> setDesignDocument db docname (addView ddoc viewname view)
 
 removeViewFromDatabase :: forall f. DatabaseName -> DocumentName -> ViewName -> MonadCouchdb f Unit
 removeViewFromDatabase db docname viewname = do
-  (ddoc@(DesignDocument{_rev}) :: DesignDocument) <- getDesignDocument db docname
-  setDesignDocument db docname (removeView ddoc viewname)
+  (mddoc:: Maybe DesignDocument) <- getDesignDocument db docname
+  case mddoc of
+    Nothing -> pure unit
+    Just ddoc@(DesignDocument{_rev}) -> setDesignDocument db docname (removeView ddoc viewname)
 
 -----------------------------------------------------------
 -- ALLDBS
