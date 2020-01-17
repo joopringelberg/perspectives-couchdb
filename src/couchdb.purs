@@ -180,6 +180,50 @@ instance encodeJonDesignDocument :: EncodeJson DesignDocument where
 
 designDocumentViews :: DesignDocument -> OBJ.Object View
 designDocumentViews = _.views <<< unwrap
+
+-----------------------------------------------------------
+-- VIEWRESULT
+-----------------------------------------------------------
+-- {
+--     "offset": 0,
+--     "rows": [
+--         {
+--             "id": "SpaghettiWithMeatballs",
+--             "key": "meatballs",
+--             "value": 1
+--         },
+--         {
+--             "id": "SpaghettiWithMeatballs",
+--             "key": "spaghetti",
+--             "value": 1
+--         },
+--         {
+--             "id": "SpaghettiWithMeatballs",
+--             "key": "tomato sauce",
+--             "value": 1
+--         }
+--     ],
+--     "total_rows": 3
+-- }
+
+newtype ViewResult f = ViewResult
+  { offset :: Int
+  , rows :: Array (ViewResultRow f)
+  , total_rows :: Int
+  }
+
+newtype ViewResultRow f = ViewResultRow { id :: String, key :: String, value :: f }
+
+derive instance genericViewResult :: Generic (ViewResult f) _
+derive instance newtypeViewResult :: Newtype (ViewResult f) _
+instance decodeViewResult :: Decode f => Decode (ViewResult f) where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+
+derive instance genericViewResultRow :: Generic (ViewResultRow f) _
+derive instance newtypeViewResultRow :: Newtype (ViewResultRow f) _
+instance decodeViewResultRow :: Decode f => Decode (ViewResultRow f) where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+
 -----------------------------------------------------------
 -- STATUS CODES
 -----------------------------------------------------------

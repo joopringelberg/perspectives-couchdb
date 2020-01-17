@@ -25,10 +25,11 @@ import Effect.Aff.AVar (status, isEmpty, read)
 import Effect.Aff.Class (liftAff)
 import Effect.Exception (Error, error)
 import Foreign (MultipleErrors)
+import Foreign.Class (class Decode)
 import Foreign.Generic (decodeJSON)
 import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), Password, User, View, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), Password, User, View, ViewResult, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.CouchdbState (MonadCouchdb, sessionCookie, setSessionCookie, takeSessionCookieValue)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
 import Prelude (Unit, bind, const, pure, show, unit, void, ($), (*>), (/=), (<$>), (<<<), (<>), (==), (>>=))
@@ -221,7 +222,10 @@ type DocumentName = String
 -- | Obtain a stringified javascript function by importing it from javascript:
 -- |  foreign import mapFunction :: String
 -- | where the javascript module holds:
--- | exports.mapFunction = (function(x) body).toString()
+-- | exports.mapFunction = (function(doc) {emit(doc.id, doc.something)}).toString()
+-- | VERY IMPORTANT: the function may not be defined with a name, i.e. this will fail:
+-- | exports.mapFunction = myFunc.stringify()
+-- | function myFunc(doc) {emit(doc.id, doc.something)}
 
 defaultDesignDocumentWithViewsSection :: String -> DesignDocument
 defaultDesignDocumentWithViewsSection n = DesignDocument
@@ -242,7 +246,7 @@ addViewToDatabase :: forall f. DatabaseName -> DocumentName -> ViewName -> View 
 addViewToDatabase db docname viewname view = do
   (mddoc :: Maybe DesignDocument) <- getDesignDocument db docname
   case mddoc of
-    Nothing -> setDesignDocument db docname (addView (defaultDesignDocumentWithViewsSection viewname) viewname view)
+    Nothing -> setDesignDocument db docname (addView (defaultDesignDocumentWithViewsSection docname) viewname view)
     Just ddoc -> setDesignDocument db docname (addView ddoc viewname view)
 
 removeViewFromDatabase :: forall f. DatabaseName -> DocumentName -> ViewName -> MonadCouchdb f Unit
@@ -251,6 +255,16 @@ removeViewFromDatabase db docname viewname = do
   case mddoc of
     Nothing -> pure unit
     Just ddoc@(DesignDocument{_rev}) -> setDesignDocument db docname (removeView ddoc viewname)
+
+-- | Get the view on the database. Notice that the type of the value in the result
+-- | is parameterised and must be an instance of Decode.
+getViewOnDatabase :: forall f value. Decode value => DatabaseName -> ViewName -> MonadCouchdb f (ViewResult value)
+getViewOnDatabase db viewname = do
+  base <- getCouchdbBaseURL
+  rq <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/application/_view/" <> viewname)}
+  onAccepted res.status [200] "getViewOnDatabase"
+    (onCorrectCallAndResponse "getViewOnDatabase" res.body \(a :: (ViewResult value)) -> pure unit)
 
 -----------------------------------------------------------
 -- ALLDBS
