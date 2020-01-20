@@ -11,11 +11,11 @@ import Control.Monad.Error.Class (class MonadError, catchJust, throwError)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut (Json, encodeJson, fromArray, fromObject, fromString)
-import Data.Array (cons, find)
+import Data.Array (cons, elemIndex, find)
 import Data.Either (Either(..))
 import Data.HTTP.Method (Method(..))
 import Data.Map (fromFoldable, insert)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), isJust)
 import Data.MediaType (MediaType)
 import Data.Newtype (unwrap)
 import Data.String (toLower)
@@ -258,11 +258,11 @@ removeViewFromDatabase db docname viewname = do
 
 -- | Get the view on the database. Notice that the type of the value in the result
 -- | is parameterised and must be an instance of Decode.
-getViewOnDatabase :: forall f value. Decode value => DatabaseName -> ViewName -> MonadCouchdb f (ViewResult value)
-getViewOnDatabase db viewname = do
+getViewOnDatabase :: forall f value. Decode value => DatabaseName -> DocumentName -> ViewName -> MonadCouchdb f (ViewResult value)
+getViewOnDatabase db docname viewname = do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
-  res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/application/_view/" <> viewname)}
+  res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/" <> docname <> "/_view/" <> viewname)}
   onAccepted res.status [200] "getViewOnDatabase"
     (onCorrectCallAndResponse "getViewOnDatabase" res.body \(a :: (ViewResult value)) -> pure unit)
 
@@ -305,6 +305,21 @@ retrieveDocumentVersion url = do
     StatusCode 200 -> version res.headers
     StatusCode 304 -> version res.headers
     otherwise -> pure Nothing
+
+-----------------------------------------------------------
+-- DELETE DOCUMENT
+-----------------------------------------------------------
+deleteDocument :: forall f. ID -> Maybe String -> MonadCouchdb f Boolean
+deleteDocument url version' = do
+  mrev <- case version' of
+    Nothing -> retrieveDocumentVersion url
+    Just v -> pure $ Just v
+  case mrev of
+    Nothing -> pure false
+    Just rev -> do
+      (rq :: (AJ.Request String)) <- defaultPerspectRequest
+      res <- liftAff $ AJ.request $ rq {method = Left DELETE, url = (url <> "?rev=" <> rev) }
+      pure $ isJust (elemIndex res.status [StatusCode 200, StatusCode 304])
 
 -----------------------------------------------------------
 -- ADD ATTACHMENT
