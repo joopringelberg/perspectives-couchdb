@@ -7,12 +7,13 @@ import Affjax.RequestHeader (RequestHeader(..))
 import Affjax.ResponseFormat as ResponseFormat
 import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
-import Control.Monad.Error.Class (class MonadError, catchJust, throwError)
+import Control.Monad.Error.Class (class MonadError, catchJust, throwError, try)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Trans.Class (lift)
 import Data.Argonaut (Json, encodeJson, fromArray, fromObject, fromString)
 import Data.Array (cons, elemIndex, find)
 import Data.Either (Either(..))
+import Data.Foldable (for_)
 import Data.HTTP.Method (Method(..))
 import Data.Map (fromFoldable, insert)
 import Data.Maybe (Maybe(..), isJust)
@@ -324,6 +325,12 @@ deleteDocument url version' = do
 -----------------------------------------------------------
 -- ADD ATTACHMENT
 -----------------------------------------------------------
+-- | Tries to attach the attachment to all paths, skips paths silently.
+addAttachmentInDatabases :: forall f. Array ID -> String -> String -> MediaType -> MonadCouchdb f Unit
+addAttachmentInDatabases docPaths attachmentName attachment mimetype = for_ docPaths \docPath -> do
+  void $ try $ addAttachment docPath attachmentName attachment mimetype
+
+-- | docPath should be `databaseName/documentName`.
 addAttachment :: forall f. ID -> String -> String -> MediaType -> MonadCouchdb f DeleteCouchdbDocument
 addAttachment docPath attachmentName attachment mimetype = do
   base <- getCouchdbBaseURL

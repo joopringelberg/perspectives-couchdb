@@ -1,7 +1,7 @@
 const path = require("path");
 
 module.exports = {
-  entry: path.join(__dirname, "output/Main/index.js" ),
+  entry: path.join(__dirname, "output/MainCouchdb/index.js" ),
   output: {
     library: "perspectives-couchdb",
     libraryTarget: "commonjs2",

@@ -16,3 +16,10 @@ However, instead one should use a version of that library that handles cookies:
 npm install xhr2-cookies
 ```
 So make sure to add that dependency when you use purescript-couchdb in a node setting.
+
+## Develop
+The root directory contains a `package.json` file with a script `build`. To build a new distribution, run
+
+```
+npm run build
+```
