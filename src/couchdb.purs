@@ -281,7 +281,8 @@ onCorrectCallAndResponse n (Left e) _ = throwError $ error (n <> ": error in cal
 onCorrectCallAndResponse n (Right r) f = do
   (x :: Either MultipleErrors a) <- pure $ runExcept (decodeJSON r)
   case x of
-    (Left e) -> throwError $ error (n <> ": error in decoding result: " <> show e)
+    (Left e) -> do 
+      throwError $ error (n <> ": error in decoding result: " <> show e)
     (Right result) -> f result *> pure result
 
 escapeCouchdbDocumentName :: String -> String

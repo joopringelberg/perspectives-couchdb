@@ -20,6 +20,9 @@ import Data.Maybe (Maybe(..), isJust)
 import Data.MediaType (MediaType)
 import Data.Newtype (unwrap)
 import Data.String (toLower)
+import Data.String.Regex (Regex, test)
+import Data.String.Regex.Flags (noFlags)
+import Data.String.Regex.Unsafe (unsafeRegex)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (message)
 import Effect.Aff.AVar (status, isEmpty, read)
@@ -133,13 +136,22 @@ databaseStatusCodes = fromFoldable
   [ Tuple 400 "Bad AJ.Request. Invalid database name."
   , Tuple 401 "Unauthorized. CouchDB Server Administrator privileges required."]
 
+databaseNameRegex :: Regex
+databaseNameRegex = unsafeRegex "^[a-z][a-z0-9_$()+/-]*$" noFlags
+
+isValidCouchdbDatabaseName :: String -> Boolean
+isValidCouchdbDatabaseName s = test databaseNameRegex s
+
+-- Database names must comply to rules given in https://docs.couchdb.org/en/stable/api/database/common.html#db
 createDatabase :: forall f. DatabaseName -> MonadCouchdb f Unit
-createDatabase dbname = ensureAuthentication do
-  base <- getCouchdbBaseURL
-  rq <- defaultPerspectRequest
-  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> dbname)}
-  -- (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.put' (base <> dbname) (Nothing :: Maybe String)
-  liftAff $ onAccepted' createStatusCodes res.status [201] "createDatabase" $ pure unit
+createDatabase dbname = if isValidCouchdbDatabaseName dbname
+  then ensureAuthentication do
+    base <- getCouchdbBaseURL
+    rq <- defaultPerspectRequest
+    res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> dbname)}
+    -- (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.put' (base <> dbname) (Nothing :: Maybe String)
+    liftAff $ onAccepted' createStatusCodes res.status [201] "createDatabase" $ pure unit
+  else throwError $ error ("createDatabase: invalid name: " <> dbname)
   where
     createStatusCodes = insert 412 "Precondition failed. Database already exists."
       databaseStatusCodes
