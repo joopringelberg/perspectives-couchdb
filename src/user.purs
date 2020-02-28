@@ -3,7 +3,7 @@ module Perspectives.User where
 import Control.Monad.AvarMonadAsk (gets, modify)
 import Data.Newtype (over, unwrap)
 import Perspectives.CouchdbState (CouchdbUser(..), MonadCouchdb, UserName(..))
-import Prelude (Unit, bind, ($), pure, (<>), (>>>), (>>=), (<<<))
+import Prelude (Unit, ($), (>>>))
 
 getUser :: forall f. MonadCouchdb f String
 getUser = gets $ _.userInfo >>> unwrap >>> _.userName >>> unwrap
@@ -26,23 +26,3 @@ getCouchdbBaseURL = gets $ _.userInfo >>> unwrap >>> _.couchdbBaseURL
 
 setCouchdbBaseURL :: forall f. String -> MonadCouchdb f Unit
 setCouchdbBaseURL pw = modify \ps@{userInfo} -> ps {userInfo = over CouchdbUser (\cur -> cur {couchdbBaseURL = pw}) userInfo}
-
--- | Url terminated with a forward slash.
-entitiesDatabase :: forall f. MonadCouchdb f String
-entitiesDatabase = do
-  userIdentifier <- getUserIdentifier
-  cdbUrl <- getCouchdbBaseURL
-  pure $ cdbUrl <> userIdentifier <> "_entities/"
-
--- | Url terminated with a forward slash.
-modelsDatabase :: forall f. MonadCouchdb f String
-modelsDatabase = do
-  userIdentifier <- getUserIdentifier
-  cdbUrl <- getCouchdbBaseURL
-  pure $ cdbUrl <> userIdentifier <> "_models/"
-
-modelsDatabaseName :: forall f. MonadCouchdb f String
-modelsDatabaseName = getUserIdentifier >>= pure <<< (_ <> "_models/")
-
-entitiesDatabaseName :: forall f. MonadCouchdb f String
-entitiesDatabaseName = getUserIdentifier >>= pure <<< (_ <> "_entities/")
