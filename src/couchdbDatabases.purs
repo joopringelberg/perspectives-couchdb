@@ -7,10 +7,10 @@ import Affjax.RequestHeader (RequestHeader(..))
 import Affjax.ResponseFormat as ResponseFormat
 import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
-import Control.Monad.Error.Class (class MonadError, catchJust, throwError, try)
+import Control.Monad.Error.Class (class MonadError, catchError, throwError, try)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Trans.Class (lift)
-import Data.Argonaut (Json, encodeJson, fromArray, fromObject, fromString)
+import Data.Argonaut (encodeJson, fromArray, fromObject, fromString)
 import Data.Array (cons, elemIndex, find)
 import Data.Either (Either(..))
 import Data.Foldable (for_)
@@ -25,7 +25,6 @@ import Data.String.Regex.Flags (noFlags)
 import Data.String.Regex.Unsafe (unsafeRegex)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (message)
-import Effect.Aff.AVar (status, isEmpty, read)
 import Effect.Aff.Class (liftAff)
 import Effect.Exception (Error, error)
 import Foreign (MultipleErrors)
@@ -33,10 +32,10 @@ import Foreign.Class (class Decode)
 import Foreign.Generic (decodeJSON)
 import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), Password, User, View, ViewResult, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
-import Perspectives.CouchdbState (MonadCouchdb, sessionCookie, setSessionCookie, takeSessionCookieValue)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), Password, SecurityDocument, User, View, ViewResult, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
-import Prelude (Unit, bind, const, pure, show, unit, void, ($), (*>), (/=), (<$>), (<<<), (<>), (==), (>>=))
+import Prelude (Unit, bind, const, pure, show, unit, void, ($), (*>), (/=), (<$>), (<>), (==))
 
 type ID = String
 
@@ -73,60 +72,20 @@ defaultPerspectRequest = qualifyRequest
 -- AUTHENTICATION
 -- See: http://127.0.0.1:5984/_utils/docs/api/server/authn.html#api-auth-cookie
 -----------------------------------------------------------
-authenticate :: forall f. MonadCouchdb f Unit
-authenticate = do
-  b <- sessionCookie >>= lift <<< status >>= pure <<< isEmpty
-  if b
-    -- An authentication request is under way. Just wait till the AVar contains a value.
-    then (sessionCookie >>= (void <<< lift <<< read))
-    -- New authentication is necessary.
-    else requestAuthentication
+ensureAuthentication :: forall f a. MonadCouchdb f a -> MonadCouchdb f a
+ensureAuthentication a = catchError a (const (requestAuthentication_ *> a))
+  where
+    isUnauthorised :: Error -> Maybe Unit
+    isUnauthorised e = if message e == "UNAUTHORIZED" then Just unit else Nothing
 
--- | To be called when the cookie is no longer valid.
-requestAuthentication :: forall f. MonadCouchdb f Unit
-requestAuthentication = do
-  _ <- takeSessionCookieValue
+requestAuthentication_ :: forall f. MonadCouchdb f Unit
+requestAuthentication_ = do
   usr <- getUser
   pwd <- getCouchdbPassword
-  requestAuthentication' usr pwd
-
--- | To be called if there is no cookie at all.
-requestAuthentication' :: forall f. User -> Password -> MonadCouchdb f Unit
-requestAuthentication' usr pwd = do
   base <- getCouchdbBaseURL
   (rq :: (AJ.Request String)) <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left POST, url = (base <> "_session"), content = Just $ RequestBody.json (fromObject (StrMap.fromFoldable [Tuple "name" (fromString usr), Tuple "password" (fromString pwd)]))}
-  -- (res :: AJ.AffjaxResponse PostCouchdb_session) <- lift $ AJ.post
-    -- (base <> "_session")
-    -- (fromObject (StrMap.fromFoldable [Tuple "name" (fromString usr), Tuple "password" (fromString pwd)]))
-  case res.status of
-    (StatusCode 200) -> saveCookie res.headers
-    (StatusCode 203) -> saveCookie res.headers
-    otherwise -> throwError $ error "Failure in authenticate. Unauthorized. Username or password wasn’t recognized"
-  where
-  -- In the browser, the cookie header is hidden from our code: the browser handles it by itself.
-  saveCookie :: Array ResponseHeader -> MonadCouchdb f Unit
-  saveCookie headers = case find (\rh -> toLower (name rh) == "set-cookie") headers of
-    Nothing -> do
-      setSessionCookie "Browser"
-    (Just h) -> do
-      -- NOTE. The Node implementation of Affjax depends on https://www.npmjs.com/package/xhr2. However, this emulation does not implement cookie authentication. Hence, we cannot use Perspectives from the command line.
-      setSessionCookie $ value h
-
-ensureAuthentication :: forall f a. MonadCouchdb f a -> MonadCouchdb f a
-ensureAuthentication a = do
-  b <- sessionCookie >>= lift <<< status >>= pure <<< isEmpty
-  if b
-    then (authenticate *> a) -- If empty, run authenticate and then run a.
-    else (catchJust predicate a (const (authenticate *> a))) -- Otherwise, try a. When we then happen to be unauthenticated (cookie expired), run authenticate, then run a.
-  where
-    predicate :: Error -> Maybe Unit
-    predicate e = if message e == "UNAUTHORIZED" then Just unit else Nothing
-
--- | A logout is purely client side, as Couchdb keeps no session state.
--- | (see: http://127.0.0.1:5984/_utils/docs/api/server/authn.html#api-auth-cookie)
-logout :: forall f. MonadCouchdb f Unit
-logout = void takeSessionCookieValue
+  onAccepted res.status [200, 203] "requestAuthentication_" (pure unit)
 
 -----------------------------------------------------------
 -- CREATE, DELETE, DATABASE
@@ -137,7 +96,7 @@ databaseStatusCodes = fromFoldable
   , Tuple 401 "Unauthorized. CouchDB Server Administrator privileges required."]
 
 databaseNameRegex :: Regex
-databaseNameRegex = unsafeRegex "^[a-z][a-z0-9_$()+/-]*$" noFlags
+databaseNameRegex = unsafeRegex "^[a-z_][a-z0-9_$()+/-]*$" noFlags
 
 isValidCouchdbDatabaseName :: String -> Boolean
 isValidCouchdbDatabaseName s = test databaseNameRegex s
@@ -187,13 +146,14 @@ type Role = String
 
 -----------------------------------------------------------
 -- SET SECURITY DOCUMENT
+-- See http://127.0.0.1:5984/_utils/docs/api/database/security.html#api-db-security
 -----------------------------------------------------------
 -- | Set the security document in the database.
-setSecurityDocument :: forall f. DatabaseName -> Json -> MonadCouchdb f Unit
+setSecurityDocument :: forall f. DatabaseName -> SecurityDocument -> MonadCouchdb f Unit
 setSecurityDocument db doc = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
-  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> db <> "/_security"), content = Just $ RequestBody.json doc}
+  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> db <> "/_security"), content = Just $ RequestBody.json (encodeJson doc)}
   liftAff $ onAccepted res.status [200, 201, 202] "setSecurityDocument" $ pure unit
 
 -----------------------------------------------------------

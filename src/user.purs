@@ -1,31 +1,48 @@
 module Perspectives.User where
 
 import Control.Monad.AvarMonadAsk (gets, modify)
-import Perspectives.CouchdbState (MonadCouchdb)
-import Prelude (Unit, bind, ($), pure, (<>), (>>>))
+import Data.Newtype (over, unwrap)
+import Perspectives.CouchdbState (CouchdbUser(..), MonadCouchdb, UserName(..))
+import Prelude (Unit, bind, ($), pure, (<>), (>>>), (>>=), (<<<))
 
 getUser :: forall f. MonadCouchdb f String
-getUser = gets $ _.userInfo >>> _.userName
+getUser = gets $ _.userInfo >>> unwrap >>> _.userName >>> unwrap
+
+getUserIdentifier :: forall f. MonadCouchdb f String
+getUserIdentifier = gets $ _.userInfo >>> unwrap >>> _.userIdentifier
 
 setUser :: forall f. String -> MonadCouchdb f Unit
-setUser n = modify \ps@{userInfo} -> ps {userInfo = userInfo {userName = n}}
+setUser n = modify \ps@{userInfo: x@(CouchdbUser cur)} -> ps {userInfo = CouchdbUser cur {userName = UserName n}}
 
 getCouchdbPassword :: forall f. MonadCouchdb f String
-getCouchdbPassword = gets $ _.userInfo >>> _.couchdbPassword
+getCouchdbPassword = gets $ _.userInfo >>> unwrap >>> _.couchdbPassword
 
 setCouchdbPassword :: forall f. String -> MonadCouchdb f Unit
-setCouchdbPassword pw = modify \ps@{userInfo} -> ps {userInfo = userInfo {couchdbPassword = pw}}
+setCouchdbPassword pw = modify \ps@{userInfo: x@(CouchdbUser cur)} -> ps {userInfo = CouchdbUser cur {couchdbPassword = pw}}
 
 -- | Url terminated with a forward slash.
 getCouchdbBaseURL :: forall f. MonadCouchdb f String
-getCouchdbBaseURL = gets $ _.userInfo >>> _.couchdbBaseURL
+getCouchdbBaseURL = gets $ _.userInfo >>> unwrap >>> _.couchdbBaseURL
 
 setCouchdbBaseURL :: forall f. String -> MonadCouchdb f Unit
-setCouchdbBaseURL pw = modify \ps@{userInfo} -> ps {userInfo = userInfo {couchdbBaseURL = pw}}
+setCouchdbBaseURL pw = modify \ps@{userInfo} -> ps {userInfo = over CouchdbUser (\cur -> cur {couchdbBaseURL = pw}) userInfo}
 
 -- | Url terminated with a forward slash.
 entitiesDatabase :: forall f. MonadCouchdb f String
 entitiesDatabase = do
-  usr <- getUser
+  userIdentifier <- getUserIdentifier
   cdbUrl <- getCouchdbBaseURL
-  pure $ cdbUrl <> "user_" <> usr <> "_entities/"
+  pure $ cdbUrl <> userIdentifier <> "_entities/"
+
+-- | Url terminated with a forward slash.
+modelsDatabase :: forall f. MonadCouchdb f String
+modelsDatabase = do
+  userIdentifier <- getUserIdentifier
+  cdbUrl <- getCouchdbBaseURL
+  pure $ cdbUrl <> userIdentifier <> "_models/"
+
+modelsDatabaseName :: forall f. MonadCouchdb f String
+modelsDatabaseName = getUserIdentifier >>= pure <<< (_ <> "_models/")
+
+entitiesDatabaseName :: forall f. MonadCouchdb f String
+entitiesDatabaseName = getUserIdentifier >>= pure <<< (_ <> "_entities/")

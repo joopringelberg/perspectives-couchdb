@@ -5,7 +5,7 @@ import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.Except (runExcept)
-import Data.Argonaut (class EncodeJson, Json, encodeJson, fromObject, fromString, jsonSingletonObject)
+import Data.Argonaut (class DecodeJson, class EncodeJson, decodeJson, encodeJson, fromObject, fromString, jsonSingletonObject)
 import Data.Array (elemIndex, find)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
@@ -225,6 +225,44 @@ instance decodeViewResultRow :: Decode f => Decode (ViewResultRow f) where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
 -----------------------------------------------------------
+-- SECURITY DOCUMENT
+-----------------------------------------------------------
+-- {
+--     "admins": {
+--         "names": [
+--             "Bob"
+--         ],
+--         "roles": []
+--     },
+--     "members": {
+--         "names": [
+--             "Mike",
+--             "Alice"
+--         ],
+--         "roles": []
+--     }
+-- }
+newtype SecurityDocument = SecurityDocument
+  { admins :: { names :: Array String, roles :: Array String}
+  , members :: { names :: Array String, roles :: Array String}
+}
+
+derive instance genericSecurityDocument :: Generic SecurityDocument _
+derive instance newtypeSecurityDocument :: Newtype SecurityDocument _
+instance decodeSecurityDocument :: Decode SecurityDocument where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+instance encodeSecurityDocument :: Encode SecurityDocument where
+  encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+instance showSecurityDocument :: Show SecurityDocument where
+  show = genericShow
+
+instance encodeJonSecurityDocument :: EncodeJson SecurityDocument where
+  encodeJson (SecurityDocument r) = encodeJson r
+
+instance decodeJonSecurityDocument :: DecodeJson SecurityDocument where
+  decodeJson j = SecurityDocument <$> decodeJson j
+
+-----------------------------------------------------------
 -- STATUS CODES
 -----------------------------------------------------------
 
@@ -281,7 +319,7 @@ onCorrectCallAndResponse n (Left e) _ = throwError $ error (n <> ": error in cal
 onCorrectCallAndResponse n (Right r) f = do
   (x :: Either MultipleErrors a) <- pure $ runExcept (decodeJSON r)
   case x of
-    (Left e) -> do 
+    (Left e) -> do
       throwError $ error (n <> ": error in decoding result: " <> show e)
     (Right result) -> f result *> pure result
 
