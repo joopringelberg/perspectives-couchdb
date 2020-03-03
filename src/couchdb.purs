@@ -18,11 +18,13 @@ import Data.Newtype (class Newtype, unwrap)
 import Data.String (Pattern(..), Replacement(..), replaceAll, toLower)
 import Data.Tuple (Tuple(..))
 import Effect.Exception (Error, error)
-import Foreign (MultipleErrors)
-import Foreign.Class (class Decode, class Encode)
+import Foreign (F, Foreign, MultipleErrors)
+import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode)
+import Foreign.JSON (parseJSON)
 import Foreign.Object (Object, fromFoldable) as OBJ
-import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<<<), (<>), (==), (<$>))
+import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
+import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<$>), (<<<), (<>), (==))
 
 -----------------------------------------------------------
 -- ALIASES
@@ -32,9 +34,10 @@ type TerminatedURL = String
 type User = String
 type Password = String
 type DatabaseName = String
+type Key = String
 
 -----------------------------------------------------------
--- DOCUMENT
+-- PUTCOUCHDBDOCUMENT
 -----------------------------------------------------------
 
 newtype PutCouchdbDocument = PutCouchdbDocument
@@ -51,6 +54,13 @@ derive instance newtypePutCouchdbDocument :: Newtype PutCouchdbDocument _
 instance decodePutCouchdbDocument :: Decode PutCouchdbDocument where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
+instance revisionPutCouchdbDocument :: Revision PutCouchdbDocument where
+  rev = _.rev <<< unwrap
+  changeRevision s d = d
+
+-----------------------------------------------------------
+-- DELETECOUCHDBDOCUMENT
+-----------------------------------------------------------
 newtype DeleteCouchdbDocument = DeleteCouchdbDocument
   { ok :: Maybe Boolean
   , id :: Maybe String
@@ -63,6 +73,10 @@ derive instance newtypeDeleteCouchdbDocument :: Newtype DeleteCouchdbDocument _
 instance decodeDeleteCouchdbDocument :: Decode DeleteCouchdbDocument where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
+instance revisionDeleteCouchdbDocument :: Revision DeleteCouchdbDocument where
+  rev = _.rev <<< unwrap
+  changeRevision s d = d
+
 -----------------------------------------------------------
 -- DBS
 -----------------------------------------------------------
@@ -73,7 +87,7 @@ instance decodeDBS :: Decode DBS where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
 -----------------------------------------------------------
--- DB
+-- GETCOUCHDBALLDOCS
 -----------------------------------------------------------
 newtype GetCouchdbAllDocs = GetCouchdbAllDocs
   { offset :: Int
@@ -87,6 +101,10 @@ derive instance newtypeCouchdbAllDocs :: Newtype GetCouchdbAllDocs _
 
 instance decodeGetCouchdbAllDocs :: Decode GetCouchdbAllDocs where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+
+instance revisionGetCouchdbAllDocs :: Revision GetCouchdbAllDocs where
+  rev _ = Nothing
+  changeRevision s d = d
 
 newtype DocReference = DocReference { id :: String, value :: Rev}
 
@@ -135,6 +153,36 @@ newtype DesignDocument = DesignDocument
   , views :: OBJ.Object View
 }
 
+derive instance genericDesignDocument :: Generic DesignDocument _
+derive instance newtypeDesignDocument :: Newtype DesignDocument _
+instance decodeDesignDocument :: Decode DesignDocument where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+instance encodeDesignDocument :: Encode DesignDocument where
+  encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+instance showDesignDocument :: Show DesignDocument where
+  show = genericShow
+instance encodeJonDesignDocument :: EncodeJson DesignDocument where
+  encodeJson (DesignDocument{_id, _rev, views})= case _rev of
+    Nothing -> fromObject $ OBJ.fromFoldable
+      [ Tuple "_id" (fromString _id)
+      , Tuple "views" (fromObject (encodeJson <$> views))
+      ]
+    Just r -> fromObject $ OBJ.fromFoldable
+      [ Tuple "_id" (fromString _id)
+      , Tuple "_rev" (fromString r)
+      , Tuple "views" (fromObject (encodeJson <$> views))
+      ]
+
+instance revisionDesignDocument :: Revision DesignDocument where
+  rev = _._rev <<< unwrap
+  changeRevision s d = d
+
+designDocumentViews :: DesignDocument -> OBJ.Object View
+designDocumentViews = _.views <<< unwrap
+
+-----------------------------------------------------------
+-- DESIGN DOCUMENT
+-----------------------------------------------------------
 newtype View = View
   { map :: String
   , reduce :: Maybe String
@@ -157,29 +205,6 @@ instance encodeJonView :: EncodeJson View where
       [ Tuple "map" (fromString map)
       , Tuple "reduce" (fromString r)
       ]
-
-derive instance genericDesignDocument :: Generic DesignDocument _
-derive instance newtypeDesignDocument :: Newtype DesignDocument _
-instance decodeDesignDocument :: Decode DesignDocument where
-  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
-instance encodeDesignDocument :: Encode DesignDocument where
-  encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
-instance showDesignDocument :: Show DesignDocument where
-  show = genericShow
-instance encodeJonDesignDocument :: EncodeJson DesignDocument where
-  encodeJson (DesignDocument{_id, _rev, views})= case _rev of
-    Nothing -> fromObject $ OBJ.fromFoldable
-      [ Tuple "_id" (fromString _id)
-      , Tuple "views" (fromObject (encodeJson <$> views))
-      ]
-    Just r -> fromObject $ OBJ.fromFoldable
-      [ Tuple "_id" (fromString _id)
-      , Tuple "_rev" (fromString r)
-      , Tuple "views" (fromObject (encodeJson <$> views))
-      ]
-
-designDocumentViews :: DesignDocument -> OBJ.Object View
-designDocumentViews = _.views <<< unwrap
 
 -----------------------------------------------------------
 -- VIEWRESULT
@@ -212,6 +237,10 @@ newtype ViewResult f = ViewResult
   , total_rows :: Int
   }
 
+instance revisionViewResult :: Revision (ViewResult f) where
+  rev _ = Nothing
+  changeRevision s d = d
+
 newtype ViewResultRow f = ViewResultRow { id :: String, key :: String, value :: f }
 
 derive instance genericViewResult :: Generic (ViewResult f) _
@@ -223,6 +252,8 @@ derive instance genericViewResultRow :: Generic (ViewResultRow f) _
 derive instance newtypeViewResultRow :: Newtype (ViewResultRow f) _
 instance decodeViewResultRow :: Decode f => Decode (ViewResultRow f) where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+  -- Decodeer het eerste niveau. Pas decode to op f: dan wordt de revisie gezet.
+  -- decode = readString >=> parseJSON >=> decode
 
 -----------------------------------------------------------
 -- SECURITY DOCUMENT
@@ -314,14 +345,22 @@ handleError n statusCodes fname =
             (Just m) -> throwError $ error $  "Failure in " <> fname <> ". " <> m
             Nothing -> throwError $ error $ "Failure in " <> fname <> ". " <> "Unknown HTTP statuscode " <> show n
 
-onCorrectCallAndResponse :: forall a m. MonadError Error m => Decode a => String -> Either ResponseFormatError String -> (a -> m Unit) -> m a
+onCorrectCallAndResponse :: forall a m. MonadError Error m => Decode a => Revision a => String -> Either ResponseFormatError String -> (a -> m Unit) -> m a
 onCorrectCallAndResponse n (Left e) _ = throwError $ error (n <> ": error in call: " <> printResponseFormatError e)
 onCorrectCallAndResponse n (Right r) f = do
-  (x :: Either MultipleErrors a) <- pure $ runExcept (decodeJSON r)
+  (x :: Either MultipleErrors a) <- pure $ runExcept (decodeResource r)
   case x of
     (Left e) -> do
       throwError $ error (n <> ": error in decoding result: " <> show e)
     (Right result) -> f result *> pure result
+  where
+    decodeResource :: String -> F a
+    -- decodeResource = parseJSON >=> decode
+    decodeResource s = do
+      (json :: Foreign) <- parseJSON s
+      rev <- getRev json
+      a <- decode json
+      pure $ (changeRevision rev) a
 
 escapeCouchdbDocumentName :: String -> String
 escapeCouchdbDocumentName s = replaceAll (Pattern ":") (Replacement "%3A") (replaceAll (Pattern "$") (Replacement "%24") s)

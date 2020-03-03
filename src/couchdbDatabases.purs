@@ -8,13 +8,15 @@ import Affjax.ResponseFormat as ResponseFormat
 import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Error.Class (class MonadError, catchError, throwError, try)
-import Control.Monad.Except (runExcept)
+import Control.Monad.Except (runExcept, runExceptT)
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Writer (WriterT, execWriterT, tell)
 import Data.Argonaut (encodeJson, fromArray, fromObject, fromString)
-import Data.Array (cons, elemIndex, find)
+import Data.Array (cons, elemIndex, find, null)
 import Data.Either (Either(..))
 import Data.Foldable (for_)
 import Data.HTTP.Method (Method(..))
+import Data.List.Lazy.Types (NonEmptyList(..))
 import Data.Map (fromFoldable, insert)
 import Data.Maybe (Maybe(..), isJust)
 import Data.MediaType (MediaType)
@@ -23,19 +25,21 @@ import Data.String (toLower)
 import Data.String.Regex (Regex, test)
 import Data.String.Regex.Flags (noFlags)
 import Data.String.Regex.Unsafe (unsafeRegex)
+import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
 import Effect.Aff (message)
 import Effect.Aff.Class (liftAff)
 import Effect.Exception (Error, error)
-import Foreign (MultipleErrors)
-import Foreign.Class (class Decode)
+import Foreign (Foreign, ForeignError(..), MultipleErrors, F)
+import Foreign.Class (class Decode, decode)
 import Foreign.Generic (decodeJSON)
 import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), Password, SecurityDocument, User, View, ViewResult, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), Key, Password, SecurityDocument, User, View, ViewResult(..), ViewResultRow(..), escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.CouchdbState (MonadCouchdb)
+import Perspectives.Representation.Class.Cacheable (Revision_)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
-import Prelude (Unit, bind, const, pure, show, unit, void, ($), (*>), (/=), (<$>), (<>), (==))
+import Prelude (Unit, bind, const, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==))
 
 type ID = String
 
@@ -231,13 +235,22 @@ removeViewFromDatabase db docname viewname = do
 
 -- | Get the view on the database. Notice that the type of the value in the result
 -- | is parameterised and must be an instance of Decode.
-getViewOnDatabase :: forall f value. Decode value => DatabaseName -> DocumentName -> ViewName -> MonadCouchdb f (ViewResult value)
-getViewOnDatabase db docname viewname = do
+getViewOnDatabase :: forall f value. Decode value => DatabaseName -> DocumentName -> ViewName -> Maybe Key -> MonadCouchdb f (Array value)
+getViewOnDatabase db docname viewname mkey = do
   base <- getCouchdbBaseURL
+  queryPart <- case mkey of
+    Nothing -> pure ""
+    Just k -> pure ("?key=\"" <> k <> "\"")
   rq <- defaultPerspectRequest
-  res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/" <> docname <> "/_view/" <> viewname)}
-  onAccepted res.status [200] "getViewOnDatabase"
-    (onCorrectCallAndResponse "getViewOnDatabase" res.body \(a :: (ViewResult value)) -> pure unit)
+  res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/" <> docname <> "/_view/" <> viewname <> queryPart)}
+  (ViewResult{rows}) <- onAccepted res.status [200] "getViewOnDatabase"
+    (onCorrectCallAndResponse "getViewOnDatabase" res.body \(a :: (ViewResult Foreign)) -> pure unit)
+  -- (\(ViewResultRow{value}) -> decode value) <$> rows
+  (r :: F (Array value)) <- pure $ (traverse (\(ViewResultRow{value}) -> decode value) rows)
+  case runExcept r of
+    Left e -> throwError (error ("getViewOnDatabase: multiple errors: " <> show e))
+    Right results -> pure results
+
 
 -----------------------------------------------------------
 -- ALLDBS
@@ -297,10 +310,20 @@ deleteDocument url version' = do
 -----------------------------------------------------------
 -- ADD ATTACHMENT
 -----------------------------------------------------------
--- | Tries to attach the attachment to all paths, skips paths silently.
+-- | Tries to attach the attachment to all paths, attempts all paths and throws the failing ones.
 addAttachmentInDatabases :: forall f. Array ID -> String -> String -> MediaType -> MonadCouchdb f Unit
-addAttachmentInDatabases docPaths attachmentName attachment mimetype = for_ docPaths \docPath -> do
-  void $ try $ addAttachment docPath attachmentName attachment mimetype
+addAttachmentInDatabases docPaths attachmentName attachment mimetype = do
+  errs <- execWriterT (for_ docPaths \docPath -> tryToAttach docPath)
+  if null errs
+    then pure unit
+    else throwError (error ("Could not attach: " <> show errs))
+  where
+    tryToAttach :: String -> WriterT (Array Error) (MonadCouchdb f) Unit
+    tryToAttach docPath = do
+      r <- try $ lift $ addAttachment docPath attachmentName attachment mimetype
+      case r of
+        Left e -> tell [e]
+        Right _ -> pure unit
 
 -- | docPath should be `databaseName/documentName`.
 addAttachment :: forall f. ID -> String -> String -> MediaType -> MonadCouchdb f DeleteCouchdbDocument
@@ -309,7 +332,7 @@ addAttachment docPath attachmentName attachment mimetype = do
   (rq@({headers}) :: (AJ.Request String)) <- defaultPerspectRequest
   mrev <- retrieveDocumentVersion  (base <> docPath)
   case mrev of
-    Nothing -> throwError (error "addAttachment needs a document revision string!")
+    Nothing -> throwError (error ("addAttachment needs a document revision string for " <> docPath))
     Just rev -> do
       res <- liftAff $ AJ.request $ rq
         { method = Left PUT
@@ -325,7 +348,7 @@ addAttachment docPath attachmentName attachment mimetype = do
 -- VERSION
 -----------------------------------------------------------
 -- | Read the version from the headers.
-version :: forall m. MonadError Error m => Array ResponseHeader -> m (Maybe String)
+version :: forall m. MonadError Error m => Array ResponseHeader -> m Revision_
 version headers =  case find (\rh -> toLower (name rh) == "etag") headers of
   Nothing -> throwError $ error ("Perspectives.Instances.version: retrieveDocumentVersion: couchdb returns no ETag header holding a document version number")
   (Just h) -> case runExcept $ decodeJSON (value h) of
