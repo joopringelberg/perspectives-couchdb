@@ -8,7 +8,7 @@ import Affjax.ResponseFormat as ResponseFormat
 import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Error.Class (class MonadError, catchError, throwError, try)
-import Control.Monad.Except (runExcept, runExceptT)
+import Control.Monad.Except (runExcept)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer (WriterT, execWriterT, tell)
 import Data.Argonaut (encodeJson, fromArray, fromObject, fromString)
@@ -16,7 +16,6 @@ import Data.Array (cons, elemIndex, find, null)
 import Data.Either (Either(..))
 import Data.Foldable (for_)
 import Data.HTTP.Method (Method(..))
-import Data.List.Lazy.Types (NonEmptyList(..))
 import Data.Map (fromFoldable, insert)
 import Data.Maybe (Maybe(..), isJust)
 import Data.MediaType (MediaType)
@@ -27,10 +26,10 @@ import Data.String.Regex.Flags (noFlags)
 import Data.String.Regex.Unsafe (unsafeRegex)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
-import Effect.Aff (message)
+import Effect.Aff (Milliseconds(..), delay, message)
 import Effect.Aff.Class (liftAff)
 import Effect.Exception (Error, error)
-import Foreign (Foreign, ForeignError(..), MultipleErrors, F)
+import Foreign (Foreign, MultipleErrors, F)
 import Foreign.Class (class Decode, decode)
 import Foreign.Generic (decodeJSON)
 import Foreign.Object (empty, insert, delete) as OBJ
@@ -39,7 +38,7 @@ import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchd
 import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.Representation.Class.Cacheable (Revision_)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
-import Prelude (Unit, bind, const, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==))
+import Prelude (Unit, bind, const, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==), discard)
 
 type ID = String
 
@@ -320,6 +319,8 @@ addAttachmentInDatabases docPaths attachmentName attachment mimetype = do
   where
     tryToAttach :: String -> WriterT (Array Error) (MonadCouchdb f) Unit
     tryToAttach docPath = do
+      -- delay to give Couchdb 2.1.2 necessary breathing space.
+      liftAff $ delay (Milliseconds 200.0)
       r <- try $ lift $ addAttachment docPath attachmentName attachment mimetype
       case r of
         Left e -> tell [e]
