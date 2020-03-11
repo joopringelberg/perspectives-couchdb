@@ -15,6 +15,7 @@ import Data.Argonaut (encodeJson, fromArray, fromObject, fromString)
 import Data.Array (cons, elemIndex, find, null)
 import Data.Either (Either(..))
 import Data.Foldable (for_)
+import Data.Generic.Rep (class Generic)
 import Data.HTTP.Method (Method(..))
 import Data.Map (fromFoldable, insert)
 import Data.Maybe (Maybe(..), isJust)
@@ -31,14 +32,15 @@ import Effect.Aff.Class (liftAff)
 import Effect.Exception (Error, error)
 import Foreign (Foreign, MultipleErrors, F)
 import Foreign.Class (class Decode, decode)
-import Foreign.Generic (decodeJSON)
+import Foreign.Generic (decodeJSON, defaultOptions, genericEncodeJSON)
+import Foreign.Generic.Class (class GenericEncode)
 import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), Key, Password, SecurityDocument, User, View, ViewResult(..), ViewResultRow(..), escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DeleteCouchdbDocument, DesignDocument(..), Key, Password, ReplicationDocument(..), SecurityDocument, User, View, ViewResult(..), ViewResultRow(..), DatabaseName, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.CouchdbState (MonadCouchdb)
-import Perspectives.Representation.Class.Cacheable (Revision_)
+import Perspectives.Representation.Class.Cacheable (class Revision, Revision_)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
-import Prelude (Unit, bind, const, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==), discard)
+import Prelude (Unit, bind, const, discard, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==))
 
 type ID = String
 
@@ -187,6 +189,44 @@ setDesignDocument db docname doc@(DesignDocument{_rev}) = ensureAuthentication d
 type DocumentName = String
 
 -----------------------------------------------------------
+-- GET/SET REPLICATION DOCUMENT
+-----------------------------------------------------------
+-- {
+--     "_id": "my_rep",
+--     "source": "http://myserver.com/foo",
+--     "target":  "http://user:pass@localhost:5984/bar",
+--     "create_target":  true,
+--     "continuous": true
+-- }
+
+getReplicationDocument :: forall f. DocumentName -> MonadCouchdb f (Maybe ReplicationDocument)
+getReplicationDocument docname = ensureAuthentication do
+  base <- getCouchdbBaseURL
+  rq <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {url = (base <> "_replicator/" <> docname)}
+  case res.status of
+    StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getReplicationDocument" res.body \(a :: ReplicationDocument) -> pure unit)
+    otherwise -> pure Nothing
+
+setReplicationDocument :: forall f. ReplicationDocument -> MonadCouchdb f Unit
+setReplicationDocument rd@(ReplicationDocument{_id}) = ensureAuthentication do
+  base <- getCouchdbBaseURL
+  rq <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> "_replicator/" <> _id), content = Just $ RequestBody.json (encodeJson rd)}
+  liftAff $ onAccepted res.status [200, 201, 202] "setReplicationDocument" $ pure unit
+
+replicateContinuously :: forall f. String -> String -> String -> MonadCouchdb f Unit
+replicateContinuously name source target = setReplicationDocument (ReplicationDocument
+  { _id: name
+  , source: source
+  , target: target
+  , create_target: false
+  , continuous: true
+  })
+
+endReplication :: forall f. DatabaseName -> DatabaseName -> MonadCouchdb f Boolean
+endReplication source target = deleteDocument_ "_replicator" (source <> "_" <> target)
+-----------------------------------------------------------
 -- VIEW
 -----------------------------------------------------------
 -- | A View is a javascript map function (possibly complemented by a reduce function, not implemented here).
@@ -292,10 +332,31 @@ retrieveDocumentVersion url = do
     otherwise -> pure Nothing
 
 -----------------------------------------------------------
+-- ADD, GET DOCUMENT
+-----------------------------------------------------------
+-- | Add a document with a GenericEncode instance to a database.
+addDocument :: forall d f rep. Generic d rep => GenericEncode rep => String -> d -> String -> MonadCouchdb f Unit
+addDocument databaseName doc docName = ensureAuthentication do
+  base <- getCouchdbBaseURL
+  rq <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> databaseName <> "/" <> docName), content = Just $ RequestBody.string (genericEncodeJSON defaultOptions doc)}
+  liftAff $ onAccepted res.status [200, 201, 202] "addDocument" $ pure unit
+
+-- | Get a document with a GenericDecode instance from a database.
+getDocument :: forall d f. Revision d => Decode d => String -> String -> MonadCouchdb f (Maybe d)
+getDocument databaseName docname = ensureAuthentication do
+  base <- getCouchdbBaseURL
+  rq <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {url = (base <> databaseName <> "/" <> docname)}
+  case res.status of
+    StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getDocument" res.body \(a :: d) -> pure unit)
+    otherwise -> pure Nothing
+
+-----------------------------------------------------------
 -- DELETE DOCUMENT
 -----------------------------------------------------------
 deleteDocument :: forall f. ID -> Maybe String -> MonadCouchdb f Boolean
-deleteDocument url version' = do
+deleteDocument url version' = ensureAuthentication do
   mrev <- case version' of
     Nothing -> retrieveDocumentVersion url
     Just v -> pure $ Just v
@@ -306,6 +367,10 @@ deleteDocument url version' = do
       res <- liftAff $ AJ.request $ rq {method = Left DELETE, url = (url <> "?rev=" <> rev) }
       pure $ isJust (elemIndex res.status [StatusCode 200, StatusCode 304])
 
+deleteDocument_ :: forall f. DatabaseName -> ID -> MonadCouchdb f Boolean
+deleteDocument_ databasename docname = do
+  base <- getCouchdbBaseURL
+  deleteDocument (base <> databasename <> "/" <> docname) Nothing
 -----------------------------------------------------------
 -- ADD ATTACHMENT
 -----------------------------------------------------------

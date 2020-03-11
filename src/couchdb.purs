@@ -5,7 +5,7 @@ import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.Except (runExcept)
-import Data.Argonaut (class DecodeJson, class EncodeJson, decodeJson, encodeJson, fromObject, fromString, jsonSingletonObject)
+import Data.Argonaut (class DecodeJson, class EncodeJson, Json, decodeJson, encodeJson, fromObject, fromString, jsonSingletonObject)
 import Data.Array (elemIndex, find)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
@@ -23,7 +23,7 @@ import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode)
 import Foreign.JSON (parseJSON)
 import Foreign.Object (Object, fromFoldable) as OBJ
-import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
+import Perspectives.Couchdb.Revision (class Revision, Revision_, changeRevision, getRev)
 import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<$>), (<<<), (<>), (==))
 
 -----------------------------------------------------------
@@ -75,6 +75,44 @@ instance decodeDeleteCouchdbDocument :: Decode DeleteCouchdbDocument where
 
 instance revisionDeleteCouchdbDocument :: Revision DeleteCouchdbDocument where
   rev = _.rev <<< unwrap
+  changeRevision s d = d
+
+-----------------------------------------------------------
+-- REPLICATIONDOCUMENT
+-----------------------------------------------------------
+-- {
+--     "_id": "my_rep",
+--     "source": "http://myserver.com/foo",
+--     "target":  "http://user:pass@localhost:5984/bar",
+--     "create_target":  true,
+--     "continuous": true
+-- }
+newtype ReplicationDocument = ReplicationDocument
+  { _id :: String
+  , source :: String
+  , target :: String
+  , create_target :: Boolean
+  , continuous :: Boolean
+  }
+
+derive instance genericReplicationDocument :: Generic ReplicationDocument _
+
+derive instance newtypeReplicationDocument :: Newtype ReplicationDocument _
+
+instance showReplicationDocument :: Show ReplicationDocument where
+  show = genericShow
+
+instance decodeReplicationDocument :: Decode ReplicationDocument where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+
+instance encodeReplicationDocument :: Encode ReplicationDocument where
+  encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+
+instance encodeJsonReplicationDocument :: EncodeJson ReplicationDocument where
+    encodeJson (ReplicationDocument ddr) = encodeJson ddr
+
+instance revisionReplicationDocument :: Revision ReplicationDocument where
+  rev v = Nothing
   changeRevision s d = d
 
 -----------------------------------------------------------
@@ -147,7 +185,9 @@ instance decodePostCouchdb_session :: Decode PostCouchdb_session where
 --         }
 --     }
 -- }
-newtype DesignDocument = DesignDocument
+newtype DesignDocument = DesignDocument DesignDocumentRecord
+
+type DesignDocumentRecord =
   { _id :: String
   , _rev :: Maybe String
   , views :: OBJ.Object View
@@ -162,6 +202,7 @@ instance encodeDesignDocument :: Encode DesignDocument where
 instance showDesignDocument :: Show DesignDocument where
   show = genericShow
 instance encodeJonDesignDocument :: EncodeJson DesignDocument where
+  -- encodeJson (DesignDocument ddr) = encodeJson ddr
   encodeJson (DesignDocument{_id, _rev, views})= case _rev of
     Nothing -> fromObject $ OBJ.fromFoldable
       [ Tuple "_id" (fromString _id)
