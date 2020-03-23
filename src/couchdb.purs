@@ -5,7 +5,7 @@ import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.Except (runExcept)
-import Data.Argonaut (class DecodeJson, class EncodeJson, Json, decodeJson, encodeJson, fromObject, fromString, jsonSingletonObject)
+import Data.Argonaut (class DecodeJson, class EncodeJson, decodeJson, encodeJson, fromObject, fromString, jsonSingletonObject)
 import Data.Array (elemIndex, find)
 import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
@@ -22,8 +22,8 @@ import Foreign (F, Foreign, MultipleErrors)
 import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode)
 import Foreign.JSON (parseJSON)
-import Foreign.Object (Object, fromFoldable) as OBJ
-import Perspectives.Couchdb.Revision (class Revision, Revision_, changeRevision, getRev)
+import Foreign.Object (Object, fromFoldable, empty) as OBJ
+import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
 import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<$>), (<<<), (<>), (==))
 
 -----------------------------------------------------------
@@ -93,6 +93,7 @@ newtype ReplicationDocument = ReplicationDocument
   , target :: String
   , create_target :: Boolean
   , continuous :: Boolean
+  , selector :: Maybe SelectorObject
   }
 
 derive instance genericReplicationDocument :: Generic ReplicationDocument _
@@ -115,6 +116,20 @@ instance revisionReplicationDocument :: Revision ReplicationDocument where
   rev v = Nothing
   changeRevision s d = d
 
+-----------------------------------------------------------
+-- SELECTOROBJECT
+-----------------------------------------------------------
+-- | We support simple SelectorObjects that specify one or more fields with a required value.
+-- | Notice that we specify a subfield selector structure. This is because we anticipate
+-- | the use of genericEncode to encode objects. This means that, instead of being a toplevel
+-- | key, the key of interest is a key in the object with key "contents".
+type SelectorObject = OBJ.Object (OBJ.Object String)
+
+selectOnField :: String -> String -> SelectorObject
+selectOnField key value = OBJ.fromFoldable [Tuple "contents" (OBJ.fromFoldable [Tuple key value])]
+
+emptySelector :: SelectorObject
+emptySelector = OBJ.fromFoldable [Tuple "contents" OBJ.empty]
 -----------------------------------------------------------
 -- DBS
 -----------------------------------------------------------

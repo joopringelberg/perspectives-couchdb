@@ -15,10 +15,9 @@ import Data.Argonaut (encodeJson, fromArray, fromObject, fromString)
 import Data.Array (cons, elemIndex, find, null)
 import Data.Either (Either(..))
 import Data.Foldable (for_)
-import Data.Generic.Rep (class Generic)
 import Data.HTTP.Method (Method(..))
 import Data.Map (fromFoldable, insert)
-import Data.Maybe (Maybe(..), isJust)
+import Data.Maybe (Maybe(..), isJust, maybe)
 import Data.MediaType (MediaType)
 import Data.Newtype (unwrap)
 import Data.String (toLower)
@@ -31,12 +30,11 @@ import Effect.Aff (Milliseconds(..), delay, message)
 import Effect.Aff.Class (liftAff)
 import Effect.Exception (Error, error)
 import Foreign (Foreign, MultipleErrors, F)
-import Foreign.Class (class Decode, decode)
-import Foreign.Generic (decodeJSON, defaultOptions, genericEncodeJSON)
-import Foreign.Generic.Class (class GenericEncode)
+import Foreign.Class (class Decode, class Encode, decode)
+import Foreign.Generic (decodeJSON, encodeJSON)
 import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DeleteCouchdbDocument, DesignDocument(..), Key, Password, ReplicationDocument(..), SecurityDocument, User, View, ViewResult(..), ViewResultRow(..), DatabaseName, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), DocReference(..), GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), emptySelector, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.Representation.Class.Cacheable (class Revision, Revision_)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
@@ -215,13 +213,14 @@ setReplicationDocument rd@(ReplicationDocument{_id}) = ensureAuthentication do
   res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> "_replicator/" <> _id), content = Just $ RequestBody.json (encodeJson rd)}
   liftAff $ onAccepted res.status [200, 201, 202] "setReplicationDocument" $ pure unit
 
-replicateContinuously :: forall f. String -> String -> String -> MonadCouchdb f Unit
-replicateContinuously name source target = setReplicationDocument (ReplicationDocument
+replicateContinuously :: forall f. String -> String -> String -> Maybe SelectorObject -> MonadCouchdb f Unit
+replicateContinuously name source target selector = setReplicationDocument (ReplicationDocument
   { _id: name
   , source: source
   , target: target
   , create_target: false
   , continuous: true
+  , selector: maybe (Just emptySelector) Just selector
   })
 
 endReplication :: forall f. DatabaseName -> DatabaseName -> MonadCouchdb f Boolean
@@ -290,7 +289,6 @@ getViewOnDatabase db docname viewname mkey = do
     Left e -> throwError (error ("getViewOnDatabase: multiple errors: " <> show e))
     Right results -> pure results
 
-
 -----------------------------------------------------------
 -- ALLDBS
 -----------------------------------------------------------
@@ -306,6 +304,22 @@ allDbs = do
       case r of
         (Left e) -> throwError $ error ("allDbs: error in decoding result: " <> show e)
         (Right dbs) -> pure $ unwrap dbs
+
+-----------------------------------------------------------
+-- DOCUMENTSINDATABASE
+-----------------------------------------------------------
+documentsInDatabase :: forall f. DatabaseName -> MonadCouchdb f GetCouchdbAllDocs
+documentsInDatabase database = do
+  base <- getCouchdbBaseURL
+  rq <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {url = (base <> database <> "/_all_docs")}
+  onAccepted res.status [200] "documentsInDatabase"
+    (onCorrectCallAndResponse "documentsInDatabase" res.body \(a :: GetCouchdbAllDocs) -> pure unit)
+
+documentNamesInDatabase :: forall f. DatabaseName -> MonadCouchdb f (Array String)
+documentNamesInDatabase database = do
+  (GetCouchdbAllDocs cad) <- documentsInDatabase database
+  pure $ (\(DocReference{id}) -> id) <$> cad.rows
 
 -----------------------------------------------------------
 -- DOCUMENT EXISTS
@@ -335,11 +349,11 @@ retrieveDocumentVersion url = do
 -- ADD, GET DOCUMENT
 -----------------------------------------------------------
 -- | Add a document with a GenericEncode instance to a database.
-addDocument :: forall d f rep. Generic d rep => GenericEncode rep => String -> d -> String -> MonadCouchdb f Unit
+addDocument :: forall d f. Encode d => String -> d -> String -> MonadCouchdb f Unit
 addDocument databaseName doc docName = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
-  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> databaseName <> "/" <> docName), content = Just $ RequestBody.string (genericEncodeJSON defaultOptions doc)}
+  res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> databaseName <> "/" <> docName), content = Just $ RequestBody.string (encodeJSON doc)}
   liftAff $ onAccepted res.status [200, 201, 202] "addDocument" $ pure unit
 
 -- | Get a document with a GenericDecode instance from a database.

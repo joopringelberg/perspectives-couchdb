@@ -26,8 +26,9 @@ import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
 type UserInfo =
   { userName :: UserName
   , couchdbPassword :: String
-  , couchdbBaseURL :: String
-  , userIdentifier :: String
+  , couchdbHost :: String
+  , couchdbPort :: Int
+  , systemIdentifier :: String
   , _rev :: Maybe String
   }
 
@@ -84,13 +85,14 @@ type MonadCouchdb f = ReaderT (AVar (CouchdbState f)) Aff
 -- | Its primary use is in addAttachment_ (to add an attachment using the default "admin" account).
 runMonadCouchdb :: forall a. String -> String -> String -> MonadCouchdb () a
   -> Aff a
-runMonadCouchdb userName password userId mp = do
+runMonadCouchdb userName password systemId mp = do
   (rf :: AVar (CouchdbState ())) <- new $
     { userInfo: CouchdbUser
       { userName: UserName userName
       , couchdbPassword: password
-      , couchdbBaseURL: "http://127.0.0.1:5984/"
-      , userIdentifier: userId
+      , couchdbHost: "http://127.0.0.1"
+      , couchdbPort: 5984
+      , systemIdentifier: systemId
       , _rev: Nothing}
     , couchdbSessionStarted: false
   }
