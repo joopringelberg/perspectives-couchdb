@@ -19,4 +19,31 @@
 
 // END LICENSE
 
-exports.getRev_ = function(json) {return json._rev}
+var EventSource = require('eventsource');
+
+// This function will be called from Perspectives Core if it want to set up an internal channel to a GUI.
+// emitStep will be bound to the constructor Emit, finishStep will be the constructor Finish.
+// databaseUrl should point to the database. It need not be terminated with a slash.
+function createChangeEmitterImpl (databaseUrl, emit, finish, emitter)
+{
+  var es = new EventSource(url + "/_changes?feed=eventsource");
+
+  // Set the handler.
+  es.onmessage = function(e) {
+    // Emit the change to Purescript.
+    emit( emitter, e )();
+  }
+
+  // Return the event source object.
+  return es;
+}
+
+function closeEventSourceImpl( es )
+{
+  es.close();
+}
+
+module.exports = {
+  createChangeEmitterImpl: createChangeEmitterImpl,
+  closeEventSourceImpl: closeEventSourceImpl
+};

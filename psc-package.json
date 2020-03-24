@@ -1,9 +1,11 @@
 {
   "name": "perspectives-couchdb",
-  "set": "psc-12.5-perspectives",
+  "set": "pv0.3.0",
   "source": "https://github.com/joopringelberg/package-sets.git",
   "depends": [
     "prelude",
+    "aff-coroutines",
+    "aff-sockets",
     "affjax",
     "foreign-generic",
     "argonaut",
