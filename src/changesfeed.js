@@ -23,25 +23,39 @@ var EventSource = require('eventsource');
 
 function createEventSourceImpl ( databaseUrl, queryParams )
 {
-  return new EventSource( url + "/_changes?feed=eventsource" + queryParams );
+  return new EventSource( databaseUrl + "/_changes?feed=eventsource" + queryParams );
 }
 
 // This function will be called from Perspectives Core if it want to set up an internal channel to a GUI.
 // emitStep will be bound to the constructor Emit, finishStep will be the constructor Finish.
 // databaseUrl should point to the database. It need not be terminated with a slash.
-function createChangeEmitterImpl (databaseUrl, emit, finish, emitter)
+function createChangeEmitterImpl (es, emitStep, finishStep, emit)
 {
-  var es = new EventSource(url + "/_changes?feed=eventsource");
-
   // Set the handler.
   es.onmessage = function(e) {
-    // Emit the change to Purescript.
-    emit( emitter, e )();
-  }
+    var doc;
+    // closeEventSourceImpl signals closing down by emitting "finish".
+    if ( e === "finish" )
+    {
+      // Emit the change to Purescript. `emit` is in Effect:
+      // emit :: forall m a r. Emitter m a r -> a -> m Unit
+      // so we have to apply the result we get from emit to sort the effect.
+      emit( finishStep( {} ) )();
+    }
+    else
+    {
+      doc = (JSON.parse ( e.data )).doc ;
+      if ( doc && !doc._deleted )
+      {
+        emit( emitStep( doc ) )();
+      }
+    }
+    };
 }
 
 function closeEventSourceImpl( es )
 {
+  es.dispatchEvent({type: "message", detail: "finish"});
   es.close();
 }
 

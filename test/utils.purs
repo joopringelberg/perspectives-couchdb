@@ -9,7 +9,7 @@ import Test.Unit.Assert as Assert
 runP :: forall a.
   MonadCouchdb () a ->
   Aff a
-runP t = runMonadCouchdb "cor" "geheim" t
+runP t = runMonadCouchdb "cor" "geheim" "cor" t
 
 shouldEqual :: forall a. Eq a => a -> a -> Aff Boolean
 shouldEqual a = \b -> pure (a == b)
