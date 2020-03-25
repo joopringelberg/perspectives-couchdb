@@ -149,6 +149,10 @@ decodeCouchdbChange' f = runExcept (decode f)
 -----------------------------------------------------------
 -- COUCHDBCHANGE
 -- This type will be used in a future release to capture changes rather than documents.
+-- This depends on decoding the CouchdbChange object from the raw JSON form produced by Couchdb.
+-- We cannot use the decode instance, because it was not encoded by its Encode instance.
+-- Simple Json would be a good tool, were it not for the doc member. We encode all documents in Perspectives
+-- using the generic encoding.
 -----------------------------------------------------------
     -- {
     --   "seq": "22...",
