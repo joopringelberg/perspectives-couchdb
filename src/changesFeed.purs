@@ -35,12 +35,10 @@ module Perspectives.Couchdb.ChangesFeed
 
   ( createEventSource
   , closeEventSource
-  , includeDocs
   , docProducer
   , changeProducer
   , EventSource
   , CouchdbChange(..)
-  , ChangeRevision
   , DocProducer
   , ChangeProducer
   , DecodedCouchdbChange
@@ -61,8 +59,7 @@ import Data.Newtype (class Newtype)
 import Effect (Effect)
 import Effect.Uncurried (EffectFn1, EffectFn2, EffectFn4, runEffectFn1, runEffectFn2, runEffectFn4)
 import Foreign (Foreign, MultipleErrors, readString)
-import Foreign.Class (class Decode, class Encode, decode)
-import Foreign.Generic (defaultOptions, genericDecode, genericEncode)
+import Foreign.Class (class Decode, decode)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Simple.JSON (readJSON')
 
@@ -237,13 +234,3 @@ instance decodeCouchdbChange :: Decode docType => Decode (CouchdbChange docType)
         -- and _deleted field.
         otherwise -> pure Nothing
     pure $ CouchdbChange $ inter {doc = doc}
-
-newtype ChangeRevision = ChangeRevision { rev :: String}
-
-derive instance genericChangeRevision :: Generic ChangeRevision _
-
-instance decodeChangeRevision :: Decode ChangeRevision where
-  decode = genericDecode defaultOptions
-
-instance encodeChangeRevision :: Encode ChangeRevision where
-  encode = genericEncode defaultOptions
