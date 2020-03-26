@@ -19,27 +19,32 @@
 
 -- END LICENSE
 
--- | This module defines a Producer (defined in Control.Coroutine) of documents that have changed in a
--- | Couchdb database. Deleted documents do not occur in the stream produced.
+-- | This module defines two `Producer`s (see Control.Coroutine):
+-- |
+-- | *  of descriptions of a change (`CouchdbChange`)
+-- | *  of documents that have changed
+-- |
+-- | of changes to a Couchdb database.
 -- | The changes feed produced by Couchdb is the source of changes.
 -- | The individual results are created by decoding the foreign results and can be
--- | either a list of multiple errors, or a document (the type of which needs to be an instance of Decode).
+-- | either a list of multiple errors, or a `CouchdbChange` or a document
+-- | (the type of which needs to be an instance of Decode).
 -- | Construct a Producer with an EventSource object created with `createEventSource`.
-
--- | In a future development, we'll capture the change itself instead of just the underlying document.
 
 module Perspectives.Couchdb.ChangesFeed
 
   ( createEventSource
   , closeEventSource
   , includeDocs
+  , docProducer
   , changeProducer
   , EventSource
   , CouchdbChange(..)
   , ChangeRevision
+  , DocProducer
   , ChangeProducer
   , DecodedCouchdbChange
-  , decodeCouchdbChange')
+  )
 
   where
 
@@ -49,16 +54,17 @@ import Control.Coroutine (Producer, transform, ($~))
 import Control.Coroutine.Aff (Emitter, Step(..), produce')
 import Control.Monad.Except (runExcept)
 import Control.Monad.Rec.Class (forever)
-import Data.Either (Either)
+import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
-import Data.Maybe (Maybe)
+import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype)
 import Effect (Effect)
 import Effect.Uncurried (EffectFn1, EffectFn2, EffectFn4, runEffectFn1, runEffectFn2, runEffectFn4)
-import Foreign (Foreign, MultipleErrors)
+import Foreign (Foreign, MultipleErrors, readString)
 import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (defaultOptions, genericDecode, genericEncode)
 import Perspectives.CouchdbState (MonadCouchdb)
+import Simple.JSON (readJSON')
 
 -----------------------------------------------------------
 -- FEEDURL, QUERYPARAMS
@@ -90,21 +96,27 @@ foreign import createEventSourceImpl :: EffectFn2 FeedUrl QueryParams EventSourc
 
 -- | From a URL (not a database name!) (string, not terminated on a slash) that identifies a Couchdb database,
 -- | and a string with extra query parameters, create an EventSource that listens to changes in the database.
--- | Documents are included by default.
-createEventSource :: FeedUrl -> QueryParams -> Effect EventSource
-createEventSource feedUrl queryParams = runEffectFn2 createEventSourceImpl feedUrl (includeDocs <> queryParams)
+-- | The Boolean parameter switches whether docs should be included.
+createEventSource :: FeedUrl -> Maybe QueryParams -> Boolean -> Effect EventSource
+createEventSource feedUrl mqueryParams withDocs = case mqueryParams of
+  Nothing -> if withDocs
+    then runEffectFn2 createEventSourceImpl feedUrl includeDocs
+    else runEffectFn2 createEventSourceImpl feedUrl ""
+  Just queryParams -> if withDocs
+    then runEffectFn2 createEventSourceImpl feedUrl (includeDocs <> queryParams)
+    else runEffectFn2 createEventSourceImpl feedUrl queryParams
 
 -----------------------------------------------------------
 -- CLOSEEVENTSOURCE
 -----------------------------------------------------------
 foreign import closeEventSourceImpl :: EffectFn1 EventSource Unit
 
--- | Terminate the Couchdb change event stream. Also terminates the Producer created with `changeProducer`.
+-- | Terminate the Couchdb change event stream. Also terminates the Producer created with `docProducer`.
 closeEventSource :: EventSource -> Effect Unit
 closeEventSource es = runEffectFn1 closeEventSourceImpl es
 
 -----------------------------------------------------------
--- CHANGEPRODUCER
+-- FOREIGNVALUEPRODUCER
 -----------------------------------------------------------
 foreign import createChangeEmitterImpl :: EffectFn4
   EventSource
@@ -113,6 +125,7 @@ foreign import createChangeEmitterImpl :: EffectFn4
   (Emitter Effect Foreign Unit)
   Unit
 
+-- Hernoem naar createForeignEmitter
 -- | Takes an EventSource and produces a function that takes an Emitter.
 -- | Apply `produce` or `produce'` to it to create a Producer of Foreign.
 createChangeEmitter ::
@@ -124,65 +137,82 @@ createChangeEmitter eventSource = runEffectFn4 createChangeEmitterImpl
   Emit
   Finish
 
-type ChangeProducer f docType = Producer (Either MultipleErrors docType) (MonadCouchdb f) Unit
-
 -- | A Producer of Foreign values. Each change to the database is emitted by the Producer.
-changeProducer :: forall f docType. Decode docType => EventSource -> ChangeProducer f docType
-changeProducer eventSource = (changeProducer' eventSource) $~ (forever (transform decodeDoc))
-
-changeProducer' :: forall f. EventSource -> Producer Foreign (MonadCouchdb f) Unit
-changeProducer' eventSource = produce' (createChangeEmitter eventSource)
-
-decodeDoc :: forall docType. Decode docType => Foreign -> Either MultipleErrors docType
-decodeDoc = runExcept <<< decode
+foreignValueProducer :: forall f. EventSource -> Producer Foreign (MonadCouchdb f) Unit
+foreignValueProducer eventSource = produce' (createChangeEmitter eventSource)
 
 -----------------------------------------------------------
--- DECODEDCOUCHDBCHANGE
+-- CHANGEPRODUCER
 -----------------------------------------------------------
--- | Is a CouchdbChange if it could be decoded correctly, a list of errors otherwise.
+type ChangeProducer f docType = Producer (DecodedCouchdbChange docType) (MonadCouchdb f) Unit
+
+-- | DecodedCouchdbChange is a CouchdbChange if it could be decoded correctly,
+-- | a list of errors otherwise.
 type DecodedCouchdbChange docType = Either MultipleErrors (CouchdbChange docType)
 
--- | The Foreign value is the encoded value of a CouchdbChange instance.
-decodeCouchdbChange' :: forall docType. Decode docType => Foreign -> DecodedCouchdbChange docType
-decodeCouchdbChange' f = runExcept (decode f)
+-- | A producer of `CouchdbChange`s.
+changeProducer :: forall f docType. Decode docType => EventSource -> ChangeProducer f docType
+changeProducer eventSource = (foreignValueProducer eventSource) $~ (forever (transform decodeCouchdbChange'))
+  where
+    -- | The Foreign value is the encoded value of a CouchdbChange instance.
+    decodeCouchdbChange' :: Foreign -> DecodedCouchdbChange docType
+    decodeCouchdbChange' f = runExcept (decode f)
+
+-----------------------------------------------------------
+-- DOCPRODUCER
+-----------------------------------------------------------
+-- | By decoding the document, we create a producer of documents.
+type DocProducer f docType = Producer (Either MultipleErrors (Maybe docType)) (MonadCouchdb f) Unit
+
+-- | A producer of Maybe documents, returning Nothing if the document is deleted
+-- | or if no documents are included in the changes (because they were not asked).
+docProducer :: forall f docType. Decode docType => EventSource -> DocProducer f docType
+docProducer eventSource = (foreignValueProducer eventSource) $~ (forever (transform decodeDoc))
+  where
+    decodeDoc :: Foreign -> Either MultipleErrors (Maybe docType)
+    decodeDoc f = case runExcept $ decode f of
+      Left e -> Left e
+      Right (CouchdbChange{doc}) -> Right doc
 
 -----------------------------------------------------------
 -- COUCHDBCHANGE
--- This type will be used in a future release to capture changes rather than documents.
--- This depends on decoding the CouchdbChange object from the raw JSON form produced by Couchdb.
--- We cannot use the decode instance, because it was not encoded by its Encode instance.
--- Simple Json would be a good tool, were it not for the doc member. We encode all documents in Perspectives
--- using the generic encoding.
 -----------------------------------------------------------
-    -- {
-    --   "seq": "22...",
-    --   "id": "emptyTransaction",
-    --   "changes": [
-    --     {
-    --       "rev": "2-f4769a3879540448d335a41418bd919d"
-    --     }
-    --   ],
-    --   "deleted": true,
-    --   "doc": {
-    --     "_id": "emptyTransaction",
-    --     "_rev": "2-f4769a3879540448d335a41418bd919d",
-    --     "_deleted": true
-    --   }
-    -- }
--- { "seq": "7-"
--- ,"id": "test1"
--- ,"changes": [{"rev":"7-dcb195a59c23f1df8c30774dfa2cc910"}]
--- ,"doc":
---   { "_id": "test1"
---   ,"_rev": "7-dcb195a59c23f1df8c30774dfa2cc910"
---   ,"contents": {"test":"Hello world!"}
---   ,"tag": "TestDoc"}}
+-- Change for a deleted document:
+-- {
+--   "seq": "22...",
+--   "id": "emptyTransaction",
+--   "changes": [
+--     {
+--       "rev": "2-f4769a3879540448d335a41418bd919d"
+--     }
+--   ],
+--   "deleted": true,
+--   "doc": {
+--     "_id": "emptyTransaction",
+--     "_rev": "2-f4769a3879540448d335a41418bd919d",
+--     "_deleted": true
+--   }
+-- }
+-- Change with a document:
+-- {
+--    "seq": "7-"
+--    ,"id": "test1"
+--    ,"changes": [{"rev":"7-dcb195a59c23f1df8c30774dfa2cc910"}]
+--    ,"doc":
+--      { "_id": "test1"
+--      ,"_rev": "7-dcb195a59c23f1df8c30774dfa2cc910"
+--      ,"contents": {"test":"Hello world!"}
+--      ,"tag": "TestDoc"
+--      }
+-- }
+-- | Represents a change in Couchdb. If deleted, the doc is not conform
+-- | its type and should not be decoded!
 newtype CouchdbChange docType = CouchdbChange
   { id :: String
   , seq :: String
-  , changes :: Array ChangeRevision
+  , changes :: Array {rev :: String}
   , deleted :: Maybe Boolean
-  , doc :: docType
+  , doc :: Maybe docType
   }
 
 derive instance genericCouchdbChange :: Generic (CouchdbChange docType) _
@@ -190,14 +220,23 @@ derive instance genericCouchdbChange :: Generic (CouchdbChange docType) _
 derive instance newTypeCouchdbChange :: Newtype (CouchdbChange docType) _
 
 instance showCouchdbChange :: Show docType => Show (CouchdbChange docType) where
-  show (CouchdbChange{id}) = "CouchdbChange: " <> id
-  -- show (CouchdbChange{id, deleted}) = "CouchdbChange: " <> id <> " (deleted=" <> show deleted <> ")"
+  -- show (CouchdbChange{id}) = "CouchdbChange: " <> id
+  show (CouchdbChange{id, deleted}) = "CouchdbChange: " <> id <> " (deleted=" <> show deleted <> ")"
 
 instance decodeCouchdbChange :: Decode docType => Decode (CouchdbChange docType) where
-  decode = genericDecode defaultOptions
-
-instance encodeCouchdbChange :: Encode docType => Encode (CouchdbChange docType) where
-  encode = genericEncode defaultOptions
+  -- decode = genericDecode defaultOptions
+  decode f = do
+    s <- readString f
+    inter <- readJSON' s
+    doc <- case inter.doc of
+      Nothing -> pure Nothing
+      Just (fdoc :: Foreign) -> case inter.deleted of
+        Nothing -> decode fdoc
+        Just false -> decode fdoc
+        -- A deleted document is not produced in full. It just has an _id, _rev
+        -- and _deleted field.
+        otherwise -> pure Nothing
+    pure $ CouchdbChange $ inter {doc = doc}
 
 newtype ChangeRevision = ChangeRevision { rev :: String}
 

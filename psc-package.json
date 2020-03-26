@@ -11,6 +11,7 @@
     "argonaut",
     "avar-monadask",
     "aff-promise",
-    "test-unit"
+    "test-unit",
+    "simple-json"
   ]
 }

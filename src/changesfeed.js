@@ -44,13 +44,10 @@ function createChangeEmitterImpl (es, emitStep, finishStep, emit)
     }
     else
     {
-      doc = (JSON.parse ( e.data )).doc ;
-      if ( doc && !doc._deleted )
-      {
-        emit( emitStep( doc ) )();
-      }
+      // console.log( JSON.parse( e.data ));
+      emit( emitStep( e.data ) )();
     }
-    };
+  };
 }
 
 function closeEventSourceImpl( es )
