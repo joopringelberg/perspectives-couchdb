@@ -55,9 +55,9 @@ import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, encodeJSON)
 import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), DocReference(..), GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), emptySelector, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
-import Perspectives.CouchdbState (MonadCouchdb)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), DocReference(..), GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), DocWithAttachmentInfo, emptySelector, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.Couchdb.Revision (class Revision, Revision_)
+import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
 import Prelude (Unit, bind, const, discard, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==))
 
@@ -377,6 +377,16 @@ addDocument databaseName doc docName = ensureAuthentication do
   res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> databaseName <> "/" <> docName), content = Just $ RequestBody.string (encodeJSON doc)}
   liftAff $ onAccepted res.status [200, 201, 202] "addDocument" $ pure unit
 
+getDocumentAsStringFromUrl :: forall f. String -> MonadCouchdb f (Maybe String)
+getDocumentAsStringFromUrl url = do
+  rq <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {url = url}
+  case res.status of
+    StatusCode 200 -> case res.body of
+      (Left e) -> throwError $ error ("getDocumentAsStringFromUrl: error in call: " <> printResponseFormatError e)
+      Right s -> pure $ Just s
+    otherwise -> pure Nothing
+
 -- | Get a document with a GenericDecode instance from a database.
 getDocument :: forall d f. Revision d => Decode d => String -> String -> MonadCouchdb f (Maybe d)
 getDocument databaseName docname = ensureAuthentication do
@@ -385,6 +395,14 @@ getDocument databaseName docname = ensureAuthentication do
   res <- liftAff $ AJ.request $ rq {url = (base <> databaseName <> "/" <> docname)}
   case res.status of
     StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getDocument" res.body \(a :: d) -> pure unit)
+    otherwise -> pure Nothing
+
+getDocumentFromUrl :: forall d f. Revision d => Decode d => String -> MonadCouchdb f (Maybe d)
+getDocumentFromUrl url = ensureAuthentication do
+  rq <- defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {url = url}
+  case res.status of
+    StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getDocumentFromUrl" res.body \(a :: d) -> pure unit)
     otherwise -> pure Nothing
 
 -----------------------------------------------------------
@@ -430,20 +448,32 @@ addAttachmentInDatabases docPaths attachmentName attachment mimetype = do
 addAttachment :: forall f. ID -> String -> String -> MediaType -> MonadCouchdb f DeleteCouchdbDocument
 addAttachment docPath attachmentName attachment mimetype = do
   base <- getCouchdbBaseURL
+  addAttachmentToUrl (base <> docPath) attachmentName attachment mimetype
+
+addAttachmentToUrl :: forall f. String -> String -> String -> MediaType -> MonadCouchdb f DeleteCouchdbDocument
+addAttachmentToUrl docUrl attachmentName attachment mimetype = do
   (rq@({headers}) :: (AJ.Request String)) <- defaultPerspectRequest
-  mrev <- retrieveDocumentVersion  (base <> docPath)
+  mrev <- retrieveDocumentVersion docUrl
   case mrev of
-    Nothing -> throwError (error ("addAttachment needs a document revision string for " <> docPath))
+    Nothing -> throwError (error ("addAttachment needs a document revision string for " <> docUrl))
     Just rev -> do
       res <- liftAff $ AJ.request $ rq
         { method = Left PUT
-        , url = base <> docPath <> "/" <> escapeCouchdbDocumentName attachmentName <> "?rev=" <> rev
+        , url = docUrl <> "/" <> escapeCouchdbDocumentName attachmentName <> "?rev=" <> rev
         , headers = cons (ContentType mimetype) headers
         , content = Just (RequestBody.string attachment)
         }
       onAccepted res.status [200, 201, 202] "addAttachment"
           (onCorrectCallAndResponse "addAttachment" res.body \(a :: DeleteCouchdbDocument)-> pure unit)
       -- For uploading attachments, the same structure is returned as for deleting a document.
+-----------------------------------------------------------
+-- GET ATTACHMENT INFO
+-----------------------------------------------------------
+getAttachments :: forall f. String -> String -> MonadCouchdb f (Maybe DocWithAttachmentInfo)
+getAttachments = getDocument
+
+getAttachmentsFromUrl :: forall f. String -> MonadCouchdb f (Maybe DocWithAttachmentInfo)
+getAttachmentsFromUrl = getDocumentFromUrl
 
 -----------------------------------------------------------
 -- VERSION

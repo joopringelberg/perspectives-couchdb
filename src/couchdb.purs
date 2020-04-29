@@ -39,13 +39,14 @@ import Data.Newtype (class Newtype, unwrap)
 import Data.String (Pattern(..), Replacement(..), replaceAll, toLower)
 import Data.Tuple (Tuple(..))
 import Effect.Exception (Error, error)
-import Foreign (F, Foreign, MultipleErrors)
+import Foreign (F, Foreign, MultipleErrors, readString, unsafeFromForeign)
 import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode)
 import Foreign.JSON (parseJSON)
 import Foreign.Object (Object, fromFoldable, empty) as OBJ
 import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
-import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<$>), (<<<), (<>), (==))
+import Prelude (class Eq, class Show, Unit, bind, map, pure, show, ($), (*>), (<$>), (<<<), (<>), (==), (>>=))
+import Simple.JSON (readJSON')
 
 -----------------------------------------------------------
 -- ALIASES
@@ -135,6 +136,41 @@ instance encodeJsonReplicationDocument :: EncodeJson ReplicationDocument where
 
 instance revisionReplicationDocument :: Revision ReplicationDocument where
   rev v = Nothing
+  changeRevision s d = d
+
+-----------------------------------------------------------
+-- ATTACHMENTS
+-----------------------------------------------------------
+  -- {
+  --     "content_type": "text/plain",
+  --     "digest": "md5-Ids41vtv725jyrN7iUvMcQ==",
+  --     "length": 1872,
+  --     "revpos": 4,
+  --     "stub": true
+  -- }
+type AttachmentRecord =
+  { content_type :: String
+  , digest :: String
+  , length :: Int
+  , revpos :: Int
+  , stub :: Boolean
+  }
+
+type AttachmentInfo = OBJ.Object AttachmentRecord
+
+newtype DocWithAttachmentInfo = DocWithAttachmentInfo DocWithAttachmentInfoR
+
+type DocWithAttachmentInfoR = {_attachments :: AttachmentInfo}
+
+instance showDocWithAttachmentInfo :: Show DocWithAttachmentInfo where
+  show (DocWithAttachmentInfo r) = show r
+
+instance decodeDocWithAttachmentInfo :: Decode DocWithAttachmentInfo where
+  -- decode f = readString f >>= map DocWithAttachmentInfo <<< readJSON'
+  decode f = pure $ DocWithAttachmentInfo $ unsafeFromForeign f
+
+instance revisionDocWithAttachmentInfo :: Revision DocWithAttachmentInfo where
+  rev _ = Nothing
   changeRevision s d = d
 
 -----------------------------------------------------------
