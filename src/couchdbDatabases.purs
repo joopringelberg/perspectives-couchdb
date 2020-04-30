@@ -55,7 +55,7 @@ import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, encodeJSON)
 import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument, DesignDocument(..), DocReference(..), GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), DocWithAttachmentInfo, emptySelector, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), DocWithAttachmentInfo, emptySelector, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.Couchdb.Revision (class Revision, Revision_)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
@@ -428,6 +428,7 @@ deleteDocument_ databasename docname = do
 -- ADD ATTACHMENT
 -----------------------------------------------------------
 -- | Tries to attach the attachment to all paths, attempts all paths and throws the failing ones.
+-- | Notice that the revision of the document changes if an attachment is added succesfully!
 addAttachmentInDatabases :: forall f. Array ID -> String -> String -> MediaType -> MonadCouchdb f Unit
 addAttachmentInDatabases docPaths attachmentName attachment mimetype = do
   errs <- execWriterT (for_ docPaths \docPath -> tryToAttach docPath)
@@ -445,6 +446,7 @@ addAttachmentInDatabases docPaths attachmentName attachment mimetype = do
         Right _ -> pure unit
 
 -- | docPath should be `databaseName/documentName`.
+-- | Notice that the revision of the document changes if an attachment is added succesfully!
 addAttachment :: forall f. ID -> String -> String -> MediaType -> MonadCouchdb f DeleteCouchdbDocument
 addAttachment docPath attachmentName attachment mimetype = do
   base <- getCouchdbBaseURL
@@ -455,7 +457,7 @@ addAttachmentToUrl docUrl attachmentName attachment mimetype = do
   (rq@({headers}) :: (AJ.Request String)) <- defaultPerspectRequest
   mrev <- retrieveDocumentVersion docUrl
   case mrev of
-    Nothing -> throwError (error ("addAttachment needs a document revision string for " <> docUrl))
+    Nothing -> pure $ DeleteCouchdbDocument {ok: Just false, id: Nothing, rev: Nothing}
     Just rev -> do
       res <- liftAff $ AJ.request $ rq
         { method = Left PUT
