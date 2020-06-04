@@ -241,7 +241,8 @@ replicateContinuously name source target selector = setReplicationDocument (Repl
   , target: target
   , create_target: false
   , continuous: true
-  , selector: maybe (Just emptySelector) Just selector
+  -- , selector: maybe (Just emptySelector) Just selector
+  , selector
   })
 
 endReplication :: forall f. DatabaseName -> DatabaseName -> MonadCouchdb f Boolean
@@ -343,7 +344,7 @@ documentNamesInDatabase database = do
   pure $ (\(DocReference{id}) -> id) <$> cad.rows
 
 -----------------------------------------------------------
--- DOCUMENT EXISTS
+-- DOCUMENT, DATABASE EXISTS
 -----------------------------------------------------------
 documentExists :: forall f. ID -> MonadCouchdb f Boolean
 documentExists url = do
@@ -354,6 +355,8 @@ documentExists url = do
     StatusCode 304 -> pure true
     otherwise -> pure false
 
+databaseExists :: forall f. ID -> MonadCouchdb f Boolean
+databaseExists = documentExists
 -----------------------------------------------------------
 -- DOCUMENT VERSION
 -----------------------------------------------------------
@@ -468,6 +471,28 @@ addAttachmentToUrl docUrl attachmentName attachment mimetype = do
       onAccepted res.status [200, 201, 202] "addAttachment"
           (onCorrectCallAndResponse "addAttachment" res.body \(a :: DeleteCouchdbDocument)-> pure unit)
       -- For uploading attachments, the same structure is returned as for deleting a document.
+
+-----------------------------------------------------------
+-- GET ATTACHMENT
+-----------------------------------------------------------
+-- | docPath should be `databaseName/documentName`.
+getAttachment :: forall f. String -> String -> MonadCouchdb f (Maybe String)
+getAttachment docPath attachmentName = do
+  base <- getCouchdbBaseURL
+  getAttachmentFromUrl (base <> docPath) attachmentName
+
+-- | url should locate the document resource and should not end on a forward slash.
+getAttachmentFromUrl :: forall f. String -> String -> MonadCouchdb f (Maybe String)
+getAttachmentFromUrl docUrl attachmentName = do
+  (rq :: (AJ.Request String)) <-  defaultPerspectRequest
+  res <- liftAff $ AJ.request $ rq {url = docUrl <> "/" <> attachmentName}
+  case elemIndex res.status [StatusCode 200, StatusCode 304] of
+    Nothing -> pure Nothing
+    Just _ -> do
+      case res.body of
+        Left e -> throwError $ error ("getAttachment: Errors on retrieving attachment: " <> (printResponseFormatError e))
+        Right attachment -> pure $ Just attachment
+
 -----------------------------------------------------------
 -- GET ATTACHMENT INFO
 -----------------------------------------------------------
