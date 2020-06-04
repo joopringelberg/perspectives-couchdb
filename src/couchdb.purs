@@ -39,14 +39,15 @@ import Data.Newtype (class Newtype, unwrap)
 import Data.String (Pattern(..), Replacement(..), replaceAll, toLower)
 import Data.Tuple (Tuple(..))
 import Effect.Exception (Error, error)
-import Foreign (F, Foreign, MultipleErrors, readString, unsafeFromForeign)
+import Foreign (F, Foreign, MultipleErrors, unsafeFromForeign)
 import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode)
 import Foreign.JSON (parseJSON)
 import Foreign.Object (Object, fromFoldable, empty) as OBJ
 import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
-import Prelude (class Eq, class Show, Unit, bind, map, pure, show, ($), (*>), (<$>), (<<<), (<>), (==), (>>=))
-import Simple.JSON (readJSON')
+import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<$>), (<<<), (<>), (==))
+import Simple.JSON (write)
+import Unsafe.Coerce (unsafeCoerce)
 
 -----------------------------------------------------------
 -- ALIASES
@@ -131,8 +132,9 @@ instance decodeReplicationDocument :: Decode ReplicationDocument where
 instance encodeReplicationDocument :: Encode ReplicationDocument where
   encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
 
+-- We use the EncodeJson instance in setReplicationDocument.
 instance encodeJsonReplicationDocument :: EncodeJson ReplicationDocument where
-    encodeJson (ReplicationDocument ddr) = encodeJson ddr
+    encodeJson (ReplicationDocument ddr) = unsafeCoerce $ write ddr
 
 instance revisionReplicationDocument :: Revision ReplicationDocument where
   rev v = Nothing
