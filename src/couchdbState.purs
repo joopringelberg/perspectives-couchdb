@@ -104,15 +104,15 @@ type MonadCouchdb f = ReaderT (AVar (CouchdbState f)) Aff
 
 -- | Run an action in MonadCouchdb, given a username and password.
 -- | Its primary use is in addAttachment_ (to add an attachment using the default "admin" account).
-runMonadCouchdb :: forall a. String -> String -> String -> MonadCouchdb () a
+runMonadCouchdb :: forall a. String -> String -> String -> String -> Int -> MonadCouchdb () a
   -> Aff a
-runMonadCouchdb userName password systemId mp = do
+runMonadCouchdb userName password systemId host port mp = do
   (rf :: AVar (CouchdbState ())) <- new $
     { userInfo: CouchdbUser
       { userName: UserName userName
       , couchdbPassword: password
-      , couchdbHost: "http://127.0.0.1"
-      , couchdbPort: 5984
+      , couchdbHost: host
+      , couchdbPort: port
       , systemIdentifier: systemId
       , _rev: Nothing}
     , couchdbSessionStarted: false
