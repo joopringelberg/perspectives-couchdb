@@ -298,11 +298,15 @@ removeViewFromDatabase db docname viewname = do
 getViewOnDatabase :: forall f value. Decode value => DatabaseName -> DocumentName -> ViewName -> Maybe Key -> MonadCouchdb f (Array value)
 getViewOnDatabase db docname viewname mkey = do
   base <- getCouchdbBaseURL
+  getViewOnDatabase_ base db docname viewname mkey
+
+getViewOnDatabase_ :: forall f value. Decode value => String -> DatabaseName -> DocumentName -> ViewName -> Maybe Key -> MonadCouchdb f (Array value)
+getViewOnDatabase_ couchdbUrl db docname viewname mkey = do
   queryPart <- case mkey of
     Nothing -> pure ""
     Just k -> pure ("?key=\"" <> k <> "\"")
   rq <- defaultPerspectRequest
-  res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/" <> docname <> "/_view/" <> viewname <> queryPart)}
+  res <- liftAff $ AJ.request $ rq {url = (couchdbUrl <> db <> "/_design/" <> docname <> "/_view/" <> viewname <> queryPart)}
   (ViewResult{rows}) <- onAccepted res.status [200] "getViewOnDatabase"
     (onCorrectCallAndResponse "getViewOnDatabase" res.body \(a :: (ViewResult Foreign)) -> pure unit)
   -- (\(ViewResultRow{value}) -> decode value) <$> rows
