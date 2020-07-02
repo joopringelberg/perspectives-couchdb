@@ -55,7 +55,7 @@ import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, encodeJSON)
 import Foreign.Object (empty, insert, delete) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), DocWithAttachmentInfo, escapeCouchdbDocumentName, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), DocWithAttachmentInfo, GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), couchdDBStatusCodes, escapeCouchdbDocumentName, handleError, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.Couchdb.Revision (class Revision, Revision_)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
@@ -397,8 +397,10 @@ getDocument databaseName docname = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (base <> databaseName <> "/" <> docname)}
-  liftAff $ onAccepted res.status [200] "getDocument"
-    (Just <$> (onCorrectCallAndResponse "getDocument" res.body \(a :: d) -> pure unit))
+  case res.status of
+    StatusCode 200 -> (Just <$> (onCorrectCallAndResponse "getDocument" res.body \(a :: d) -> pure unit))
+    StatusCode 404 -> pure Nothing
+    StatusCode n -> handleError n couchdDBStatusCodes "getDocument"
 
 getDocumentFromUrl :: forall d f. Revision d => Decode d => String -> MonadCouchdb f (Maybe d)
 getDocumentFromUrl url = ensureAuthentication do
