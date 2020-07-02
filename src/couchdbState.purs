@@ -46,9 +46,6 @@ import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
 -----------------------------------------------------------
 type UserInfo =
   { userName :: UserName
-  , couchdbPassword :: String
-  , couchdbHost :: String
-  , couchdbPort :: Int
   , systemIdentifier :: String
   , _rev :: Maybe String
   }
@@ -97,6 +94,9 @@ instance ordUserName :: Ord UserName where
 type CouchdbState f =
   { userInfo :: CouchdbUser
   , couchdbSessionStarted :: Boolean
+  , couchdbPassword :: String
+  , couchdbHost :: String
+  , couchdbPort :: Int
   | f
   }
 
@@ -110,12 +110,12 @@ runMonadCouchdb userName password systemId host port mp = do
   (rf :: AVar (CouchdbState ())) <- new $
     { userInfo: CouchdbUser
       { userName: UserName userName
-      , couchdbPassword: password
-      , couchdbHost: host
-      , couchdbPort: port
       , systemIdentifier: systemId
       , _rev: Nothing}
     , couchdbSessionStarted: false
+    , couchdbPassword: password
+    , couchdbHost: host
+    , couchdbPort: port
   }
   runReaderT mp rf
 
