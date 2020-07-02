@@ -47,7 +47,7 @@ import Data.String.Regex.Flags (noFlags)
 import Data.String.Regex.Unsafe (unsafeRegex)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
-import Effect.Aff (Milliseconds(..), delay, message)
+import Effect.Aff (Milliseconds(..), delay)
 import Effect.Aff.Class (liftAff)
 import Effect.Exception (Error, error)
 import Foreign (Foreign, MultipleErrors, F)
@@ -98,9 +98,6 @@ defaultPerspectRequest = qualifyRequest
 -----------------------------------------------------------
 ensureAuthentication :: forall f a. MonadCouchdb f a -> MonadCouchdb f a
 ensureAuthentication a = catchError a (const (requestAuthentication_ *> a))
-  where
-    isUnauthorised :: Error -> Maybe Unit
-    isUnauthorised e = if message e == "UNAUTHORIZED" then Just unit else Nothing
 
 requestAuthentication_ :: forall f. MonadCouchdb f Unit
 requestAuthentication_ = do
@@ -400,9 +397,8 @@ getDocument databaseName docname = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (base <> databaseName <> "/" <> docname)}
-  case res.status of
-    StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getDocument" res.body \(a :: d) -> pure unit)
-    otherwise -> pure Nothing
+  liftAff $ onAccepted res.status [200] "getDocument"
+    (Just <$> (onCorrectCallAndResponse "getDocument" res.body \(a :: d) -> pure unit))
 
 getDocumentFromUrl :: forall d f. Revision d => Decode d => String -> MonadCouchdb f (Maybe d)
 getDocumentFromUrl url = ensureAuthentication do
