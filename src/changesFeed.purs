@@ -56,10 +56,12 @@ import Data.Either (Either(..))
 import Data.Generic.Rep (class Generic)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (class Newtype)
+import Data.Tuple (Tuple(..))
 import Effect (Effect)
 import Effect.Uncurried (EffectFn1, EffectFn2, EffectFn4, runEffectFn1, runEffectFn2, runEffectFn4)
 import Foreign (Foreign, MultipleErrors, readString)
 import Foreign.Class (class Decode, decode)
+import Perspectives.Couchdb.Databases (deleteDocument_)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Simple.JSON (readJSON')
 
@@ -159,17 +161,19 @@ changeProducer eventSource = (foreignValueProducer eventSource) $~ (forever (tra
 -- DOCPRODUCER
 -----------------------------------------------------------
 -- | By decoding the document, we create a producer of documents.
-type DocProducer f docType = Producer (Either MultipleErrors (Maybe docType)) (MonadCouchdb f) Unit
+type DocProducer f docType = Producer (Either MultipleErrors (Tuple String (Maybe docType))) (MonadCouchdb f) Unit
 
 -- | A producer of Maybe documents, returning Nothing if the document is deleted
 -- | or if no documents are included in the changes (because they were not asked).
 docProducer :: forall f docType. Decode docType => EventSource -> DocProducer f docType
 docProducer eventSource = (foreignValueProducer eventSource) $~ (forever (transform decodeDoc))
   where
-    decodeDoc :: Foreign -> Either MultipleErrors (Maybe docType)
+    decodeDoc :: Foreign -> Either MultipleErrors (Tuple String (Maybe docType))
     decodeDoc f = case runExcept $ decode f of
       Left e -> Left e
-      Right (CouchdbChange{doc}) -> Right doc
+      Right (CouchdbChange{id, doc}) -> do
+        Right $ Tuple id doc
+
 
 -----------------------------------------------------------
 -- COUCHDBCHANGE
