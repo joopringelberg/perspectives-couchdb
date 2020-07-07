@@ -96,6 +96,7 @@ foreign import createEventSourceImpl :: EffectFn2 FeedUrl QueryParams EventSourc
 -- | From a URL (not a database name!) (string, not terminated on a slash) that identifies a Couchdb database,
 -- | and a string with extra query parameters, create an EventSource that listens to changes in the database.
 -- | The Boolean parameter switches whether docs should be included.
+-- | If necessary, include credentials in the url in the format http://user:password@{domain}/etc.
 createEventSource :: FeedUrl -> Maybe QueryParams -> Boolean -> Effect EventSource
 createEventSource feedUrl mqueryParams withDocs = case mqueryParams of
   Nothing -> if withDocs

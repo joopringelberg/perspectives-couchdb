@@ -22,9 +22,17 @@
 module Perspectives.User where
 
 import Control.Monad.AvarMonadAsk (gets, modify)
+import Control.Monad.Error.Class (throwError)
+import Data.Array.NonEmpty (length, index)
+import Data.Maybe (Maybe(..), fromJust)
 import Data.Newtype (unwrap)
+import Data.String.Regex (Regex, match)
+import Data.String.Regex.Flags (noFlags)
+import Data.String.Regex.Unsafe (unsafeRegex)
+import Effect.Exception (error)
+import Partial.Unsafe (unsafePartial)
 import Perspectives.CouchdbState (CouchdbUser(..), MonadCouchdb, UserName(..))
-import Prelude (Unit, bind, pure, show, ($), (<>), (>>>))
+import Prelude (Unit, bind, pure, show, ($), (<>), (>>>), (<))
 
 getUser :: forall f. MonadCouchdb f String
 getUser = gets $ _.userInfo >>> unwrap >>> _.userName >>> unwrap
@@ -47,6 +55,24 @@ getCouchdbBaseURL = do
   couchdbHost <- gets $ _.couchdbHost
   couchdbPort <- gets $ _.couchdbPort
   pure (couchdbHost <> ":" <> show couchdbPort <> "/")
+
+-- | Url in the format http://user:password@{domain}:{port}/
+getCouchdbBaseURLWithCredentials :: forall f . MonadCouchdb f String
+getCouchdbBaseURLWithCredentials = do
+  couchdbHost <- gets $ _.couchdbHost
+  couchdbPort <- gets $ _.couchdbPort
+  user <- getUser
+  password <- getCouchdbPassword
+  case match domainRegex couchdbHost of
+    Nothing -> throwError (error $ "getCouchdbBaseURLWithCredentials: couchdbHost not well-formed: " <> couchdbHost)
+    Just matches | length matches < 3 -> throwError (error $ "getCouchdbBaseURLWithCredentials: couchdbHost not well-formed: " <> couchdbHost)
+    Just matches -> case (unsafePartial (fromJust (index matches 1))), (unsafePartial (fromJust (index matches 2))) of
+      Just scheme, Just domain -> pure $ scheme <> user <> ":" <> password <> "@" <> domain <> ":" <> show couchdbPort <> "/"
+      _, _ -> throwError (error $ "getCouchdbBaseURLWithCredentials: couchdbHost not well-formed: " <> couchdbHost)
+  where
+    domainRegex :: Regex
+    domainRegex = unsafeRegex "^(https?\\:\\/\\/)(.*)$" noFlags
+
 
 getHost :: forall f. MonadCouchdb f String
 getHost = gets $ _.couchdbHost

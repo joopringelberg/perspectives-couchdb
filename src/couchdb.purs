@@ -46,7 +46,7 @@ import Foreign.JSON (parseJSON)
 import Foreign.Object (Object, fromFoldable, empty) as OBJ
 import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
 import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<$>), (<<<), (<>), (==))
-import Simple.JSON (write)
+import Simple.JSON (class WriteForeign, write)
 import Unsafe.Coerce (unsafeCoerce)
 
 -----------------------------------------------------------
@@ -112,8 +112,8 @@ instance revisionDeleteCouchdbDocument :: Revision DeleteCouchdbDocument where
 -- }
 newtype ReplicationDocument = ReplicationDocument
   { _id :: String
-  , source :: String
-  , target :: String
+  , source :: ReplicationEndpoint
+  , target :: ReplicationEndpoint
   , create_target :: Boolean
   , continuous :: Boolean
   , selector :: Maybe SelectorObject
@@ -140,6 +140,31 @@ instance revisionReplicationDocument :: Revision ReplicationDocument where
   rev v = Nothing
   changeRevision s d = d
 
+-----------------------------------------------------------
+-- REPLICATIONENDPOINT
+-----------------------------------------------------------
+newtype ReplicationEndpoint = ReplicationEndpoint
+  { url :: String
+  , headers :: OBJ.Object String
+  }
+
+derive instance genericReplicationEndpoint :: Generic ReplicationEndpoint _
+
+instance showReplicationEndpoint :: Show ReplicationEndpoint where
+  show = genericShow
+
+instance decodeReplicationEndpoint :: Decode ReplicationEndpoint where
+  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+
+instance encodeReplicationEndpoint :: Encode ReplicationEndpoint where
+  encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+
+-- We use the EncodeJson instance in setReplicationDocument.
+instance encodeJsonReplicationEndpoint :: EncodeJson ReplicationEndpoint where
+    encodeJson (ReplicationEndpoint ddr) = unsafeCoerce $ write ddr
+
+instance writeForeignReplicationEndpoint :: WriteForeign ReplicationEndpoint where
+  writeImpl (ReplicationEndpoint r) = write r
 -----------------------------------------------------------
 -- ATTACHMENTS
 -----------------------------------------------------------

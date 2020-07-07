@@ -42,6 +42,7 @@ import Data.Maybe (Maybe(..), isJust)
 import Data.MediaType (MediaType)
 import Data.Newtype (unwrap)
 import Data.String (toLower)
+import Data.String.Base64 (btoa)
 import Data.String.Regex (Regex, test)
 import Data.String.Regex.Flags (noFlags)
 import Data.String.Regex.Unsafe (unsafeRegex)
@@ -53,9 +54,9 @@ import Effect.Exception (Error, error)
 import Foreign (Foreign, MultipleErrors, F)
 import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, encodeJSON)
-import Foreign.Object (empty, insert, delete) as OBJ
+import Foreign.Object (empty, insert, delete, singleton) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), DocWithAttachmentInfo, GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), couchdDBStatusCodes, escapeCouchdbDocumentName, handleError, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), DocWithAttachmentInfo, GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), ReplicationEndpoint(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), couchdDBStatusCodes, escapeCouchdbDocumentName, handleError, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.Couchdb.Revision (class Revision, Revision_)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
@@ -232,15 +233,21 @@ setReplicationDocument rd@(ReplicationDocument{_id}) = ensureAuthentication do
   liftAff $ onAccepted res.status [200, 201, 202] "setReplicationDocument" $ pure unit
 
 replicateContinuously :: forall f. String -> String -> String -> Maybe SelectorObject -> MonadCouchdb f Unit
-replicateContinuously name source target selector = setReplicationDocument (ReplicationDocument
-  { _id: name
-  , source: source
-  , target: target
-  , create_target: false
-  , continuous: true
-  -- , selector: maybe (Just emptySelector) Just selector
-  , selector
-  })
+replicateContinuously name source target selector = do
+  usr <- getUser
+  pwd <- getCouchdbPassword
+  bvalue <- pure (btoa (usr <> ":" <> pwd))
+  case bvalue of
+    Left e -> pure unit
+    Right auth -> setReplicationDocument (ReplicationDocument
+        { _id: name
+        , source: ReplicationEndpoint {url: source, headers: OBJ.singleton "Authorization" ("Basic " <> auth)}
+        , target: ReplicationEndpoint {url: target, headers: OBJ.singleton "Authorization" ("Basic " <> auth)}
+        , create_target: false
+        , continuous: true
+        -- , selector: maybe (Just emptySelector) Just selector
+        , selector
+        })
 
 endReplication :: forall f. DatabaseName -> DatabaseName -> MonadCouchdb f Boolean
 endReplication source target = deleteDocument_ "_replicator" (source <> "_" <> target)

@@ -1,6 +1,6 @@
 {
   "name": "perspectives-couchdb",
-  "set": "pv0.4.0",
+  "set": "pv0.5.1",
   "source": "https://github.com/joopringelberg/package-sets.git",
   "depends": [
     "prelude",
@@ -12,6 +12,7 @@
     "avar-monadask",
     "aff-promise",
     "test-unit",
-    "simple-json"
+    "simple-json",
+    "b64"
   ]
 }
