@@ -207,10 +207,28 @@ instance revisionDocWithAttachmentInfo :: Revision DocWithAttachmentInfo where
 -- | Notice that we specify a subfield selector structure. This is because we anticipate
 -- | the use of genericEncode to encode objects. This means that, instead of being a toplevel
 -- | key, the key of interest is a key in the object with key "contents".
-type SelectorObject = OBJ.Object (OBJ.Object String)
+-- | See http://127.0.0.1:5984/_utils/docs/api/database/find.html#subfields for an explanation of subfields.
+-- | See http://127.0.0.1:5984/_utils/docs/replication/replicator.html#selectorobj and
+-- | see http://127.0.0.1:5984/_utils/docs/api/database/find.html#find-selectors
+type SelectorObject = OBJ.Object (OBJ.Object (OBJ.Object String))
 
-selectOnField :: String -> String -> SelectorObject
-selectOnField key value = OBJ.fromFoldable [Tuple "contents" (OBJ.fromFoldable [Tuple key value])]
+-- | The value selected by the key must be equal to the given value.
+-- | This produces the following selector:
+-- |      {
+-- |			"contents": {
+-- |			  "<key>": {"$eq": "<value>"}
+-- |			}
+selectOnFieldEqual :: String -> String -> SelectorObject
+selectOnFieldEqual key value = OBJ.fromFoldable [Tuple "contents" (OBJ.fromFoldable [Tuple key (OBJ.fromFoldable [Tuple "$eq" value])])]
+
+-- | The value selected by the key must be different from the given value.
+-- | This produces the following selector:
+-- |      {
+-- |			"contents": {
+-- |			  "<key>": {"$ne": "<value>"}
+-- |			}
+selectOnFieldNotEqual :: String -> String -> SelectorObject
+selectOnFieldNotEqual key value = OBJ.fromFoldable [Tuple "contents" (OBJ.fromFoldable [Tuple key (OBJ.fromFoldable [Tuple "$ne" value])])]
 
 emptySelector :: SelectorObject
 emptySelector = OBJ.fromFoldable [Tuple "contents" OBJ.empty]
