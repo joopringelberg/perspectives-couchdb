@@ -56,11 +56,11 @@ import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, encodeJSON)
 import Foreign.Object (empty, insert, delete, singleton) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), DocWithAttachmentInfo, GetCouchdbAllDocs(..), Key, Password, ReplicationDocument(..), ReplicationEndpoint(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), couchdDBStatusCodes, escapeCouchdbDocumentName, handleError, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), DocWithAttachmentInfo, GetCouchdbAllDocs(..), Password, ReplicationDocument(..), ReplicationEndpoint(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), couchdDBStatusCodes, escapeCouchdbDocumentName, handleError, onAccepted, onAccepted', onCorrectCallAndResponse)
 import Perspectives.Couchdb.Revision (class Revision, Revision_)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
-import Prelude (Unit, bind, const, discard, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==))
+import Prelude (class Show, Unit, bind, const, discard, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==))
 
 type ID = String
 
@@ -299,20 +299,28 @@ removeViewFromDatabase db docname viewname = do
 
 -- | Get the view on the database. Notice that the type of the value in the result
 -- | is parameterised and must be an instance of Decode.
-getViewOnDatabase :: forall f value. Decode value => DatabaseName -> DocumentName -> ViewName -> Maybe Key -> MonadCouchdb f (Array value)
+getViewOnDatabase :: forall f value key.
+  Show key =>
+  Decode key =>
+  Decode value => 
+  DatabaseName -> DocumentName -> ViewName -> Maybe key -> MonadCouchdb f (Array value)
 getViewOnDatabase db docname viewname mkey = do
   base <- getCouchdbBaseURL
   getViewOnDatabase_ base db docname viewname mkey
 
-getViewOnDatabase_ :: forall f value. Decode value => String -> DatabaseName -> DocumentName -> ViewName -> Maybe Key -> MonadCouchdb f (Array value)
+getViewOnDatabase_ :: forall f value key.
+  Show key =>
+  Decode key =>
+  Decode value =>
+  String -> DatabaseName -> DocumentName -> ViewName -> Maybe key -> MonadCouchdb f (Array value)
 getViewOnDatabase_ couchdbUrl db docname viewname mkey = do
   queryPart <- case mkey of
     Nothing -> pure ""
-    Just k -> pure ("?key=\"" <> k <> "\"")
+    Just k -> pure ("?key=" <> show k)
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (couchdbUrl <> db <> "/_design/" <> docname <> "/_view/" <> viewname <> queryPart)}
   (ViewResult{rows}) <- onAccepted res.status [200] "getViewOnDatabase"
-    (onCorrectCallAndResponse "getViewOnDatabase" res.body \(a :: (ViewResult Foreign)) -> pure unit)
+    (onCorrectCallAndResponse "getViewOnDatabase" res.body \(a :: (ViewResult Foreign key)) -> pure unit)
   -- (\(ViewResultRow{value}) -> decode value) <$> rows
   (r :: F (Array value)) <- pure $ (traverse (\(ViewResultRow{value}) -> decode value) rows)
   case runExcept r of

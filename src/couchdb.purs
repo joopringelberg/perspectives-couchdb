@@ -57,7 +57,6 @@ type TerminatedURL = String
 type User = String
 type Password = String
 type DatabaseName = String
-type Key = String
 
 -----------------------------------------------------------
 -- PUTCOUCHDBDOCUMENT
@@ -389,26 +388,26 @@ instance encodeJonView :: EncodeJson View where
 --     "total_rows": 3
 -- }
 
-newtype ViewResult f = ViewResult
+newtype ViewResult f k = ViewResult
   { offset :: Int
-  , rows :: Array (ViewResultRow f)
+  , rows :: Array (ViewResultRow f k)
   , total_rows :: Int
   }
 
-instance revisionViewResult :: Revision (ViewResult f) where
+instance revisionViewResult :: Revision (ViewResult f k) where
   rev _ = Nothing
   changeRevision s d = d
 
-newtype ViewResultRow f = ViewResultRow { id :: String, key :: String, value :: f }
+newtype ViewResultRow f k = ViewResultRow { id :: String, key :: k, value :: f }
 
-derive instance genericViewResult :: Generic (ViewResult f) _
-derive instance newtypeViewResult :: Newtype (ViewResult f) _
-instance decodeViewResult :: Decode f => Decode (ViewResult f) where
+derive instance genericViewResult :: Generic (ViewResult f k) _
+derive instance newtypeViewResult :: Newtype (ViewResult f k) _
+instance decodeViewResult :: (Decode f, Decode k) => Decode (ViewResult f k) where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 
-derive instance genericViewResultRow :: Generic (ViewResultRow f) _
-derive instance newtypeViewResultRow :: Newtype (ViewResultRow f) _
-instance decodeViewResultRow :: Decode f => Decode (ViewResultRow f) where
+derive instance genericViewResultRow :: Generic (ViewResultRow f k) _
+derive instance newtypeViewResultRow :: Newtype (ViewResultRow f k) _
+instance decodeViewResultRow :: (Decode f, Decode k) => Decode (ViewResultRow f k) where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
   -- Decodeer het eerste niveau. Pas decode to op f: dan wordt de revisie gezet.
   -- decode = readString >=> parseJSON >=> decode
