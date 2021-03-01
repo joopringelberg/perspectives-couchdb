@@ -28,7 +28,7 @@ import Affjax.RequestHeader (RequestHeader(..))
 import Affjax.ResponseFormat as ResponseFormat
 import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode(..))
-import Control.Monad.Error.Class (class MonadError, catchError, throwError, try)
+import Control.Monad.Error.Class (class MonadError, catchJust, throwError, try)
 import Control.Monad.Except (runExcept)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer (WriterT, execWriterT, tell)
@@ -38,7 +38,7 @@ import Data.Either (Either(..))
 import Data.Foldable (for_)
 import Data.HTTP.Method (Method(..))
 import Data.Map (fromFoldable, insert)
-import Data.Maybe (Maybe(..), isJust)
+import Data.Maybe (Maybe(..))
 import Data.MediaType (MediaType)
 import Data.Newtype (unwrap)
 import Data.String (toLower)
@@ -60,7 +60,7 @@ import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchd
 import Perspectives.Couchdb.Revision (class Revision, Revision_)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
-import Prelude (class Show, Unit, bind, const, discard, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==))
+import Prelude (class Show, Unit, bind, discard, pure, show, unit, ($), (*>), (/=), (<$>), (<>), (==))
 
 type ID = String
 
@@ -97,8 +97,14 @@ defaultPerspectRequest = qualifyRequest
 -- AUTHENTICATION
 -- See: http://127.0.0.1:5984/_utils/docs/api/server/authn.html#api-auth-cookie
 -----------------------------------------------------------
+authenticationErrorRegEx :: Regex
+authenticationErrorRegEx = unsafeRegex "UNAUTHORIZED" noFlags
+
 ensureAuthentication :: forall f a. MonadCouchdb f a -> MonadCouchdb f a
-ensureAuthentication a = catchError a (const (requestAuthentication_ *> a))
+ensureAuthentication a = catchJust
+  (\e -> if test authenticationErrorRegEx (show e) then Just true else Nothing)
+  a
+  \_ -> requestAuthentication_ *> a
 
 requestAuthentication_ :: forall f. MonadCouchdb f Unit
 requestAuthentication_ = do
@@ -302,7 +308,7 @@ removeViewFromDatabase db docname viewname = do
 getViewOnDatabase :: forall f value key.
   Show key =>
   Decode key =>
-  Decode value => 
+  Decode value =>
   DatabaseName -> DocumentName -> ViewName -> Maybe key -> MonadCouchdb f (Array value)
 getViewOnDatabase db docname viewname mkey = do
   base <- getCouchdbBaseURL
@@ -438,7 +444,8 @@ deleteDocument url version' = ensureAuthentication do
     Just rev -> do
       (rq :: (AJ.Request String)) <- defaultPerspectRequest
       res <- liftAff $ AJ.request $ rq {method = Left DELETE, url = (url <> "?rev=" <> rev) }
-      pure $ isJust (elemIndex res.status [StatusCode 200, StatusCode 304])
+      -- pure $ isJust (elemIndex res.status [StatusCode 200, StatusCode 304])
+      onAccepted res.status [200, 202] ("removeEntiteit(" <> url <> ")") (pure true)
 
 deleteDocument_ :: forall f. DatabaseName -> ID -> MonadCouchdb f Boolean
 deleteDocument_ databasename docname = do

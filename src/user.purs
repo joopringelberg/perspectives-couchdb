@@ -31,32 +31,31 @@ import Data.String.Regex.Flags (noFlags)
 import Data.String.Regex.Unsafe (unsafeRegex)
 import Effect.Exception (error)
 import Partial.Unsafe (unsafePartial)
-import Perspectives.CouchdbState (CouchdbUser(..), MonadCouchdb, UserName(..))
+import Perspectives.CouchdbState (MonadCouchdb, UserName(..))
 import Prelude (Unit, bind, pure, show, ($), (<>), (>>>), (<))
 
 getUser :: forall f. MonadCouchdb f String
-getUser = gets $ _.userInfo >>> unwrap >>> _.userName >>> unwrap
+getUser = gets $ _.userInfo >>> _.userName >>> unwrap
 
 -- TODO. Verplaats naar de core.
 -- | Returns a guid"
 getSystemIdentifier :: forall f. MonadCouchdb f String
-getSystemIdentifier = gets $ _.userInfo >>> unwrap >>> _.systemIdentifier
+getSystemIdentifier = gets $ _.userInfo >>> _.systemIdentifier
 
 setUser :: forall f. String -> MonadCouchdb f Unit
-setUser n = modify \ps@{userInfo: x@(CouchdbUser cur)} -> ps {userInfo = CouchdbUser cur {userName = UserName n}}
+setUser n = modify \ps@{userInfo: cur} -> ps {userInfo = cur {userName = UserName n}}
 
 getCouchdbPassword :: forall f. MonadCouchdb f String
 getCouchdbPassword = gets _.couchdbPassword
 
 -- | Url terminated with a forward slash.
--- TODO: construeer uit Host en Port.
 getCouchdbBaseURL :: forall f. MonadCouchdb f String
 getCouchdbBaseURL = do
   couchdbHost <- gets $ _.couchdbHost
   couchdbPort <- gets $ _.couchdbPort
   pure (couchdbHost <> ":" <> show couchdbPort <> "/")
 
--- | Url in the format http://user:password@{domain}:{port}/
+-- | Returns a Url in the format http://user:password@{domain}:{port}/
 getCouchdbBaseURLWithCredentials :: forall f . MonadCouchdb f String
 getCouchdbBaseURLWithCredentials = do
   couchdbHost <- gets $ _.couchdbHost

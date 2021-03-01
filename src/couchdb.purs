@@ -502,6 +502,10 @@ handleError n statusCodes fname =
             (Just m) -> throwError $ error $  "Failure in " <> fname <> ". " <> m
             Nothing -> throwError $ error $ "Failure in " <> fname <> ". " <> "Unknown HTTP statuscode " <> show n
 
+-- | Parses the string to a JSON object and then decodes that,
+-- | while setting the _rev of the payload (the entity) to that of the envelope (the document as stored in Couchdb).
+-- | Throws an error when the result could not be decoded to the required type.
+-- | Applies the supplied function to the entity, but returns the entity itself.
 onCorrectCallAndResponse :: forall a m. MonadError Error m => Decode a => Revision a => String -> Either ResponseFormatError String -> (a -> m Unit) -> m a
 onCorrectCallAndResponse n (Left e) _ = throwError $ error (n <> ": error in call: " <> printResponseFormatError e)
 onCorrectCallAndResponse n (Right r) f = do
@@ -511,6 +515,8 @@ onCorrectCallAndResponse n (Right r) f = do
       throwError $ error (n <> ": error in decoding result: " <> show e)
     (Right result) -> f result *> pure result
   where
+    -- Takes the _rev of the document (the 'outer' revision) before decoding
+    -- and sets it in the _rev of the content (the inner revision).
     decodeResource :: String -> F a
     -- decodeResource = parseJSON >=> decode
     decodeResource s = do
