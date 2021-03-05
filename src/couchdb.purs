@@ -431,7 +431,8 @@ instance decodeViewResultRow :: (Decode f, Decode k) => Decode (ViewResultRow f 
 --     }
 -- }
 newtype SecurityDocument = SecurityDocument
-  { admins :: { names :: Array String, roles :: Array String}
+  { _id :: String
+  , admins :: { names :: Array String, roles :: Array String}
   , members :: { names :: Array String, roles :: Array String}
 }
 
