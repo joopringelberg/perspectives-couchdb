@@ -46,7 +46,7 @@ import Foreign.JSON (parseJSON)
 import Foreign.Object (Object, fromFoldable, empty) as OBJ
 import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
 import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<$>), (<<<), (<>), (==))
-import Simple.JSON (class WriteForeign, write)
+import Simple.JSON (class ReadForeign, class WriteForeign, readImpl, write, writeImpl)
 import Unsafe.Coerce (unsafeCoerce)
 
 -----------------------------------------------------------
@@ -431,17 +431,25 @@ instance decodeViewResultRow :: (Decode f, Decode k) => Decode (ViewResultRow f 
 --     }
 -- }
 newtype SecurityDocument = SecurityDocument
-  { _id :: String
-  , admins :: { names :: Array String, roles :: Array String}
-  , members :: { names :: Array String, roles :: Array String}
+  { admins :: { names :: Maybe (Array String), roles :: Array String}
+  , members :: { names :: Maybe (Array String), roles :: Array String}
 }
 
 derive instance genericSecurityDocument :: Generic SecurityDocument _
 derive instance newtypeSecurityDocument :: Newtype SecurityDocument _
+
+instance readForeignSecurityDocument :: ReadForeign SecurityDocument where
+  readImpl sd = SecurityDocument <$> readImpl sd
+
 instance decodeSecurityDocument :: Decode SecurityDocument where
-  decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+  decode = readImpl
+
+instance writeForeignSecurityDocument :: WriteForeign SecurityDocument where
+  writeImpl (SecurityDocument sd) = writeImpl sd
+
 instance encodeSecurityDocument :: Encode SecurityDocument where
-  encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+  encode = writeImpl
+
 instance showSecurityDocument :: Show SecurityDocument where
   show = genericShow
 
