@@ -8,12 +8,13 @@ import Control.Monad.Free (Free)
 import Control.Monad.Rec.Class (forever)
 import Data.Either (Either)
 import Data.Generic.Rep (class Generic)
-import Data.Generic.Rep.Show (genericShow)
 import Data.Maybe (Maybe(..))
+import Data.Show.Generic (genericShow)
+import Data.Tuple (Tuple)
 import Effect.Aff (Milliseconds(..), delay, forkAff)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
-import Effect.Class.Console (log, logShow)
+import Effect.Class.Console (logShow)
 import Foreign (MultipleErrors)
 import Foreign.Class (class Decode, class Encode)
 import Foreign.Generic (defaultOptions, genericDecode, genericEncode)
@@ -91,7 +92,7 @@ theSuite = suiteOnly "ChangesFeed" do
     liftAff $ assert "A ChangeProducer must be created" true
     )
 
-consumeRequest :: Consumer (Either MultipleErrors (Maybe TestDoc)) (MonadCouchdb ()) Unit
+consumeRequest :: Consumer (Either MultipleErrors (Tuple String (Maybe TestDoc))) (MonadCouchdb ()) Unit
 consumeRequest = forever do
   change <- await
   logShow change

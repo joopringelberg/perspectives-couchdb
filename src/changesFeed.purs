@@ -61,7 +61,6 @@ import Effect (Effect)
 import Effect.Uncurried (EffectFn1, EffectFn2, EffectFn4, runEffectFn1, runEffectFn2, runEffectFn4)
 import Foreign (Foreign, MultipleErrors, readString)
 import Foreign.Class (class Decode, decode)
-import Perspectives.Couchdb.Databases (deleteDocument_)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Simple.JSON (readJSON')
 
@@ -237,5 +236,5 @@ instance decodeCouchdbChange :: Decode docType => Decode (CouchdbChange docType)
         Just false -> decode fdoc
         -- A deleted document is not produced in full. It just has an _id, _rev
         -- and _deleted field.
-        otherwise -> pure Nothing
+        _ -> pure Nothing
     pure $ CouchdbChange $ inter {doc = doc}

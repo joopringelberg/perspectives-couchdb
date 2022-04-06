@@ -4,3 +4,4 @@
 /.purs*
 /.psa*
 /node_modules/
+.spago

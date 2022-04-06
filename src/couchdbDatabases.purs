@@ -21,8 +21,7 @@
 
 module Perspectives.Couchdb.Databases where
 
-import Affjax (printResponseFormatError)
-import Affjax (request, get, Request) as AJ
+import Affjax (request, get, Request, printError) as AJ
 import Affjax.RequestBody as RequestBody
 import Affjax.RequestHeader (RequestHeader(..))
 import Affjax.ResponseFormat as ResponseFormat
@@ -33,7 +32,7 @@ import Control.Monad.Except (runExcept)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Writer (WriterT, execWriterT, tell)
 import Data.Argonaut (encodeJson, fromArray, fromObject, fromString)
-import Data.Array (cons, elemIndex, find, null)
+import Data.Array (cons, find, null)
 import Data.Either (Either(..))
 import Data.Foldable (for_)
 import Data.HTTP.Method (Method(..))
@@ -48,15 +47,15 @@ import Data.String.Regex.Flags (noFlags)
 import Data.String.Regex.Unsafe (unsafeRegex)
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..))
-import Effect.Aff (Milliseconds(..), delay)
+import Effect.Aff (Error, Milliseconds(..), delay)
 import Effect.Aff.Class (liftAff)
-import Effect.Exception (Error, error)
+import Effect.Exception (error)
 import Foreign (Foreign, MultipleErrors, F)
 import Foreign.Class (class Decode, class Encode, decode)
 import Foreign.Generic (decodeJSON, encodeJSON)
 import Foreign.Object (empty, insert, delete, singleton) as OBJ
 import Foreign.Object (fromFoldable) as StrMap
-import Perspectives.Couchdb (CouchdbStatusCodes, DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), DocWithAttachmentInfo, GetCouchdbAllDocs(..), Password, ReplicationDocument(..), ReplicationEndpoint(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), couchdDBStatusCodes, escapeCouchdbDocumentName, handleError, onAccepted, onAccepted', onCorrectCallAndResponse)
+import Perspectives.Couchdb (DBS, DatabaseName, DeleteCouchdbDocument(..), DesignDocument(..), DocReference(..), DocWithAttachmentInfo, GetCouchdbAllDocs(..), Password, ReplicationDocument(..), ReplicationEndpoint(..), SecurityDocument, SelectorObject, User, View, ViewResult(..), ViewResultRow(..), CouchdbStatusCodes, escapeCouchdbDocumentName, onAccepted, onAccepted', onAccepted_, onCorrectCallAndResponse)
 import Perspectives.Couchdb.Revision (class Revision, Revision_)
 import Perspectives.CouchdbState (MonadCouchdb)
 import Perspectives.User (getCouchdbBaseURL, getUser, getCouchdbPassword)
@@ -78,7 +77,7 @@ qualifyRequest req@{headers} = do
   cookie <- pure Nothing
   case cookie of
     (Just x) | x /= "Browser" -> pure $ req {headers = cons (RequestHeader "Cookie" x) headers}
-    otherwise -> pure req
+    _ -> pure req
 
 defaultPerspectRequest :: forall f. MonadCouchdb f (AJ.Request String)
 defaultPerspectRequest = qualifyRequest
@@ -91,6 +90,7 @@ defaultPerspectRequest = qualifyRequest
   , password: Nothing
   , withCredentials: true
   , responseFormat: ResponseFormat.string
+  , timeout: Nothing
 }
 
 -----------------------------------------------------------
@@ -113,7 +113,10 @@ requestAuthentication_ = do
   base <- getCouchdbBaseURL
   (rq :: (AJ.Request String)) <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left POST, url = (base <> "_session"), content = Just $ RequestBody.json (fromObject (StrMap.fromFoldable [Tuple "name" (fromString usr), Tuple "password" (fromString pwd)]))}
-  onAccepted res.status [200, 203] "requestAuthentication_" (pure unit)
+  -- onAccepted res.status [200, 203] "requestAuthentication_" (pure unit)
+  onAccepted res  [StatusCode 200, StatusCode 203] "requestAuthentication_" (\_ -> pure unit)
+
+type CouchdbFunctionName = String
 
 -----------------------------------------------------------
 -- CREATE, DELETE, DATABASE
@@ -137,7 +140,7 @@ createDatabase dbname = if isValidCouchdbDatabaseName dbname
     rq <- defaultPerspectRequest
     res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> dbname)}
     -- (res :: AJ.AffjaxResponse String) <- liftAff $ AJ.put' (base <> dbname) (Nothing :: Maybe String)
-    liftAff $ onAccepted' createStatusCodes res.status [201] "createDatabase" $ pure unit
+    onAccepted' createStatusCodes res [StatusCode 201] "createDatabase" (\_ -> pure unit)
   else throwError $ error ("createDatabase: invalid name: " <> dbname)
   where
     createStatusCodes = insert 412 "Precondition failed. Database already exists."
@@ -149,7 +152,12 @@ deleteDatabase dbname = ensureAuthentication do
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left DELETE, url = (base <> dbname)}
   -- liftAff $ AJ.put' (base <> dbname) (Nothing :: Maybe String)
-  liftAff $ onAccepted' deleteStatusCodes res.status [200] "deleteDatabase" $ pure unit
+  onAccepted'
+    deleteStatusCodes
+    res
+    [StatusCode 200]
+    "deleteDatabase"
+    (\_ -> pure unit)
   where
     deleteStatusCodes = insert 412 "Precondition failed. Database does not exist."
       databaseStatusCodes
@@ -168,7 +176,7 @@ createUser user password roles = ensureAuthentication do
     , Tuple "roles" (fromArray (fromString <$> roles))
     , Tuple "type" (fromString "user")]))
   res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> "_users/org.couchdb.user:" <> user), content = Just $ RequestBody.json content}
-  liftAff $ onAccepted res.status [200, 201] "createUser" $ pure unit
+  onAccepted res [StatusCode 200, StatusCode 201] "createUser" (\_ -> pure unit)
 
 type Role = String
 
@@ -182,7 +190,7 @@ setSecurityDocument db doc = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> db <> "/_security"), content = Just $ RequestBody.json (encodeJson doc)}
-  liftAff $ onAccepted res.status [200, 201, 202] "setSecurityDocument" $ pure unit
+  liftAff $ onAccepted res [StatusCode 200, StatusCode 201, StatusCode 202] "setSecurityDocument" (\_ -> pure unit)
 
 -----------------------------------------------------------
 -- GET/SET DESIGN DOCUMENT
@@ -193,9 +201,12 @@ getDesignDocument db docname = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (base <> db <> "/_design/" <> docname)}
-  case res.status of
-    StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getDesignDocument" res.body \(a :: DesignDocument) -> pure unit)
-    otherwise -> pure Nothing
+  onAccepted_
+    (\_ _ -> pure Nothing)
+    res
+    [StatusCode 200]
+    "getDesignDocument"
+    \response -> Just <$> onCorrectCallAndResponse "getDesignDocument" response.body
 
 -- | Set the design document in the database.
 setDesignDocument :: forall f. DatabaseName -> DocumentName -> DesignDocument -> MonadCouchdb f Unit
@@ -207,7 +218,7 @@ setDesignDocument db docname doc@(DesignDocument{_rev}) = ensureAuthentication d
   rq <- defaultPerspectRequest
   -- res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> db <> "/_design/" <> docname <> rev), content = Just $ RequestBody.string (unsafeStringify $ encode doc)}
   res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> db <> "/_design/" <> docname <> rev), content = Just $ RequestBody.json (encodeJson doc)}
-  liftAff $ onAccepted res.status [200, 201, 202] "setDesignDocument" $ pure unit
+  liftAff $ onAccepted res [StatusCode 200, StatusCode 201, StatusCode 202] "setDesignDocument" (\_ -> pure unit)
 
 type DocumentName = String
 
@@ -227,16 +238,19 @@ getReplicationDocument docname = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (base <> "_replicator/" <> docname)}
-  case res.status of
-    StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getReplicationDocument" res.body \(a :: ReplicationDocument) -> pure unit)
-    otherwise -> pure Nothing
+  onAccepted_
+    (\_ _ -> pure Nothing)
+    res
+    [StatusCode 200]
+    "getReplicationDocument"
+    \response -> Just <$> onCorrectCallAndResponse "getReplicationDocument" response.body
 
 setReplicationDocument :: forall f. ReplicationDocument -> MonadCouchdb f Unit
 setReplicationDocument rd@(ReplicationDocument{_id}) = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> "_replicator/" <> _id), content = Just $ RequestBody.json (encodeJson rd)}
-  liftAff $ onAccepted res.status [200, 201, 202] "setReplicationDocument" $ pure unit
+  liftAff $ onAccepted res [StatusCode 200, StatusCode 201, StatusCode 202] "setReplicationDocument" (\_ -> pure unit)
 
 replicateContinuously :: forall f. String -> String -> String -> Maybe SelectorObject -> MonadCouchdb f Unit
 replicateContinuously name source target selector = do
@@ -244,7 +258,7 @@ replicateContinuously name source target selector = do
   pwd <- getCouchdbPassword
   bvalue <- pure (btoa (usr <> ":" <> pwd))
   case bvalue of
-    Left e -> pure unit
+    Left _ -> pure unit
     Right auth -> setReplicationDocument (ReplicationDocument
         { _id: name
         , source: ReplicationEndpoint {url: source, headers: OBJ.singleton "Authorization" ("Basic " <> auth)}
@@ -325,13 +339,20 @@ getViewOnDatabase_ couchdbUrl db docname viewname mkey = do
     Just k -> pure ("?key=" <> show k)
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (couchdbUrl <> db <> "/_design/" <> docname <> "/_view/" <> viewname <> queryPart)}
-  (ViewResult{rows}) <- onAccepted res.status [200] "getViewOnDatabase"
-    (onCorrectCallAndResponse "getViewOnDatabase" res.body \(a :: (ViewResult Foreign key)) -> pure unit)
-  -- (\(ViewResultRow{value}) -> decode value) <$> rows
-  (r :: F (Array value)) <- pure $ (traverse (\(ViewResultRow{value}) -> decode value) rows)
-  case runExcept r of
-    Left e -> throwError (error ("getViewOnDatabase: multiple errors: " <> show e))
-    Right results -> pure results
+  onAccepted_
+    (\_ _ -> pure [])
+    res
+    [StatusCode 200]
+    "getViewOnDatabase_"
+    -- (\_ -> pure [])
+    (\response -> do
+      ((ViewResult{rows}) :: (ViewResult Foreign key)) <- onCorrectCallAndResponse
+        "getViewOnDatabase_"
+        response.body
+      (r :: F (Array value)) <- pure $ (traverse (\(ViewResultRow{value}) -> decode value) rows)
+      case runExcept r of
+        Left e -> throwError (error ("getViewOnDatabase: multiple errors: " <> show e))
+        Right results -> pure results)
 
 -----------------------------------------------------------
 -- ALLDBS
@@ -341,10 +362,10 @@ allDbs = do
   base <- getCouchdbBaseURL
   res <- lift $ AJ.get ResponseFormat.string (base <> "_all_dbs")
   -- pure $ unwrap res.response
-  case res.body of
-    (Left r) -> throwError $ error ("allDbs: error in call: " <> printResponseFormatError r)
-    (Right s) -> do
-      (r :: Either MultipleErrors DBS) <- pure $ runExcept (decodeJSON s)
+  case res of
+    (Left r) -> throwError $ error ("allDbs: error in call: " <> AJ.printError r)
+    (Right response) -> do
+      (r :: Either MultipleErrors DBS) <- pure $ runExcept (decodeJSON response.body)
       case r of
         (Left e) -> throwError $ error ("allDbs: error in decoding result: " <> show e)
         (Right dbs) -> pure $ unwrap dbs
@@ -357,8 +378,11 @@ documentsInDatabase database = do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (base <> database <> "/_all_docs")}
-  onAccepted res.status [200] "documentsInDatabase"
-    (onCorrectCallAndResponse "documentsInDatabase" res.body \(a :: GetCouchdbAllDocs) -> pure unit)
+  onAccepted
+    res
+    [StatusCode 200]
+    "documentsInDatabase"
+    (\response -> onCorrectCallAndResponse "documentsInDatabase" response.body)
 
 documentNamesInDatabase :: forall f. DatabaseName -> MonadCouchdb f (Array String)
 documentNamesInDatabase database = do
@@ -372,10 +396,12 @@ documentExists :: forall f. ID -> MonadCouchdb f Boolean
 documentExists url = do
   (rq :: (AJ.Request String)) <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left HEAD, url = url}
-  case res.status of
-    StatusCode 200 -> pure true
-    StatusCode 304 -> pure true
-    otherwise -> pure false
+  onAccepted_
+    (\_ _ -> pure false)
+    res
+    [StatusCode 200, StatusCode 304]
+    "documentExists"
+    (\_ -> pure true)
 
 databaseExists :: forall f. ID -> MonadCouchdb f Boolean
 databaseExists = documentExists
@@ -386,10 +412,12 @@ retrieveDocumentVersion :: forall f. ID -> MonadCouchdb f (Maybe String)
 retrieveDocumentVersion url = do
   (rq :: (AJ.Request String)) <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left HEAD, url = url}
-  case res.status of
-    StatusCode 200 -> version res.headers
-    StatusCode 304 -> version res.headers
-    otherwise -> pure Nothing
+  onAccepted_
+    (\_ _ -> pure Nothing)
+    res
+    [StatusCode 200, StatusCode 203]
+    "requestAuthentication_"
+    (\response -> version response.headers)
 
 -----------------------------------------------------------
 -- ADD, GET DOCUMENT
@@ -400,17 +428,18 @@ addDocument databaseName doc docName = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> databaseName <> "/" <> docName), content = Just $ RequestBody.string (encodeJSON doc)}
-  liftAff $ onAccepted res.status [200, 201, 202] "addDocument" $ pure unit
+  liftAff $ onAccepted res [StatusCode 200, StatusCode 201, StatusCode 202] "addDocument" (\_ -> pure unit)
 
 getDocumentAsStringFromUrl :: forall f. String -> MonadCouchdb f (Maybe String)
 getDocumentAsStringFromUrl url = do
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = url}
-  case res.status of
-    StatusCode 200 -> case res.body of
-      (Left e) -> throwError $ error ("getDocumentAsStringFromUrl: error in call: " <> printResponseFormatError e)
-      Right s -> pure $ Just s
-    otherwise -> pure Nothing
+  onAccepted_
+    (\_ _ -> pure Nothing)
+    res
+    [StatusCode 200]
+    "getDocumentAsStringFromUrl"
+    \x -> pure $ Just x.body
 
 -- | Get a document with a GenericDecode instance from a database.
 getDocument :: forall d f. Revision d => Decode d => String -> String -> MonadCouchdb f (Maybe d)
@@ -418,18 +447,23 @@ getDocument databaseName docname = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = (base <> databaseName <> "/" <> docname)}
-  case res.status of
-    StatusCode 200 -> (Just <$> (onCorrectCallAndResponse "getDocument" res.body \(a :: d) -> pure unit))
-    StatusCode 404 -> pure Nothing
-    StatusCode n -> handleError n couchdDBStatusCodes "getDocument"
+  onAccepted_
+    (\_ _ -> pure Nothing)
+    res
+    [StatusCode 200]
+    "getDocument"
+    (\response -> Just <$> onCorrectCallAndResponse "getDocument" response.body)
 
 getDocumentFromUrl :: forall d f. Revision d => Decode d => String -> MonadCouchdb f (Maybe d)
 getDocumentFromUrl url = ensureAuthentication do
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = url}
-  case res.status of
-    StatusCode 200 -> Just <$> (onCorrectCallAndResponse "getDocumentFromUrl" res.body \(a :: d) -> pure unit)
-    otherwise -> pure Nothing
+  onAccepted_
+    (\_ _ -> pure Nothing)
+    res
+    [StatusCode 200]
+    "getDocumentFromUrl"
+    (\response -> Just <$> onCorrectCallAndResponse "getDocumentFromUrl" response.body)
 
 -----------------------------------------------------------
 -- DELETE DOCUMENT
@@ -445,7 +479,12 @@ deleteDocument url version' = ensureAuthentication do
       (rq :: (AJ.Request String)) <- defaultPerspectRequest
       res <- liftAff $ AJ.request $ rq {method = Left DELETE, url = (url <> "?rev=" <> rev) }
       -- pure $ isJust (elemIndex res.status [StatusCode 200, StatusCode 304])
-      onAccepted res.status [200, 202] ("removeEntiteit(" <> url <> ")") (pure true)
+      onAccepted_
+        (\_ _ -> pure true)
+        res
+        [StatusCode 200, StatusCode 202]
+        ("removeEntiteit(" <> url <> ")")
+        (\_ -> pure true)
 
 deleteDocument_ :: forall f. DatabaseName -> ID -> MonadCouchdb f Boolean
 deleteDocument_ databasename docname = do
@@ -492,8 +531,11 @@ addAttachmentToUrl docUrl attachmentName attachment mimetype = do
         , headers = cons (ContentType mimetype) headers
         , content = Just (RequestBody.string attachment)
         }
-      onAccepted res.status [200, 201, 202] "addAttachment"
-          (onCorrectCallAndResponse "addAttachment" res.body \(a :: DeleteCouchdbDocument)-> pure unit)
+      onAccepted res [StatusCode 200, StatusCode 201, StatusCode 202] "addAttachmentToUrl"
+        (\response -> onCorrectCallAndResponse "addAttachmentToUrl" response.body)
+
+      -- onAccepted res.status [200, 201, 202] "addAttachment"
+      --     (onCorrectCallAndResponse "addAttachment" res.body \(a :: DeleteCouchdbDocument)-> pure unit)
       -- For uploading attachments, the same structure is returned as for deleting a document.
 
 -----------------------------------------------------------
@@ -510,12 +552,12 @@ getAttachmentFromUrl :: forall f. String -> String -> MonadCouchdb f (Maybe Stri
 getAttachmentFromUrl docUrl attachmentName = do
   (rq :: (AJ.Request String)) <-  defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {url = docUrl <> "/" <> attachmentName}
-  case elemIndex res.status [StatusCode 200, StatusCode 304] of
-    Nothing -> pure Nothing
-    Just _ -> do
-      case res.body of
-        Left e -> throwError $ error ("getAttachment: Errors on retrieving attachment: " <> (printResponseFormatError e))
-        Right attachment -> pure $ Just attachment
+  onAccepted_
+    (\_ _ -> pure Nothing)
+    res
+    [StatusCode 200, StatusCode 203]
+    "getAttachmentFromUrl"
+    \response -> pure $ Just response.body
 
 -----------------------------------------------------------
 -- GET ATTACHMENT INFO
@@ -534,5 +576,5 @@ version :: forall m. MonadError Error m => Array ResponseHeader -> m Revision_
 version headers =  case find (\rh -> toLower (name rh) == "etag") headers of
   Nothing -> throwError $ error ("Perspectives.Instances.version: retrieveDocumentVersion: couchdb returns no ETag header holding a document version number")
   (Just h) -> case runExcept $ decodeJSON (value h) of
-    Left e -> pure Nothing
+    Left _ -> pure Nothing
     Right v -> pure $ Just v

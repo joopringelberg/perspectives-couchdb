@@ -21,21 +21,21 @@
 
 module Perspectives.Couchdb where
 
-import Affjax (ResponseFormatError, printResponseFormatError)
+import Affjax (Response)
+import Affjax (printError, Error) as AJ
 import Affjax.ResponseHeader (ResponseHeader, name, value)
-import Affjax.StatusCode (StatusCode(..))
+import Affjax.StatusCode (StatusCode)
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.Except (runExcept)
 import Data.Argonaut (class DecodeJson, class EncodeJson, decodeJson, encodeJson, fromObject, fromString, jsonSingletonObject)
 import Data.Array (elemIndex, find)
 import Data.Either (Either(..))
+import Data.Eq.Generic (genericEq)
 import Data.Generic.Rep (class Generic)
-import Data.Generic.Rep.Eq (genericEq)
-import Data.Generic.Rep.Show (genericShow)
-import Data.Map (Map, fromFoldable, lookup)
+import Data.Map (Map, fromFoldable, lookup, empty)
 import Data.Maybe (Maybe(..))
-import Data.Monoid (mempty)
 import Data.Newtype (class Newtype, unwrap)
+import Data.Show.Generic (genericShow)
 import Data.String (Pattern(..), Replacement(..), replaceAll, toLower)
 import Data.Tuple (Tuple(..))
 import Effect.Exception (Error, error)
@@ -45,7 +45,7 @@ import Foreign.Generic (decodeJSON, defaultOptions, genericDecode, genericEncode
 import Foreign.JSON (parseJSON)
 import Foreign.Object (Object, fromFoldable, empty) as OBJ
 import Perspectives.Couchdb.Revision (class Revision, changeRevision, getRev)
-import Prelude (class Eq, class Show, Unit, bind, pure, show, ($), (*>), (<$>), (<<<), (<>), (==))
+import Prelude (class Eq, class Show, bind, pure, show, ($), (<$>), (<<<), (<>), (==))
 import Simple.JSON (class ReadForeign, class WriteForeign, readImpl, write, writeImpl)
 import Unsafe.Coerce (unsafeCoerce)
 
@@ -78,7 +78,7 @@ instance decodePutCouchdbDocument :: Decode PutCouchdbDocument where
 
 instance revisionPutCouchdbDocument :: Revision PutCouchdbDocument where
   rev = _.rev <<< unwrap
-  changeRevision s d = d
+  changeRevision _ d = d
 
 -----------------------------------------------------------
 -- DELETECOUCHDBDOCUMENT
@@ -97,7 +97,7 @@ instance decodeDeleteCouchdbDocument :: Decode DeleteCouchdbDocument where
 
 instance revisionDeleteCouchdbDocument :: Revision DeleteCouchdbDocument where
   rev = _.rev <<< unwrap
-  changeRevision s d = d
+  changeRevision _ d = d
 
 -----------------------------------------------------------
 -- REPLICATIONDOCUMENT
@@ -136,8 +136,8 @@ instance encodeJsonReplicationDocument :: EncodeJson ReplicationDocument where
     encodeJson (ReplicationDocument ddr) = unsafeCoerce $ write ddr
 
 instance revisionReplicationDocument :: Revision ReplicationDocument where
-  rev v = Nothing
-  changeRevision s d = d
+  rev _ = Nothing
+  changeRevision _ d = d
 
 -----------------------------------------------------------
 -- REPLICATIONENDPOINT
@@ -197,7 +197,7 @@ instance decodeDocWithAttachmentInfo :: Decode DocWithAttachmentInfo where
 
 instance revisionDocWithAttachmentInfo :: Revision DocWithAttachmentInfo where
   rev _ = Nothing
-  changeRevision s d = d
+  changeRevision _ d = d
 
 -----------------------------------------------------------
 -- SELECTOROBJECT
@@ -258,7 +258,7 @@ instance decodeGetCouchdbAllDocs :: Decode GetCouchdbAllDocs where
 
 instance revisionGetCouchdbAllDocs :: Revision GetCouchdbAllDocs where
   rev _ = Nothing
-  changeRevision s d = d
+  changeRevision _ d = d
 
 newtype DocReference = DocReference { id :: String, value :: Rev}
 
@@ -332,7 +332,7 @@ instance encodeJonDesignDocument :: EncodeJson DesignDocument where
 
 instance revisionDesignDocument :: Revision DesignDocument where
   rev = _._rev <<< unwrap
-  changeRevision s d = d
+  changeRevision _ d = d
 
 designDocumentViews :: DesignDocument -> OBJ.Object View
 designDocumentViews = _.views <<< unwrap
@@ -396,7 +396,7 @@ newtype ViewResult f k = ViewResult
 
 instance revisionViewResult :: Revision (ViewResult f k) where
   rev _ = Nothing
-  changeRevision s d = d
+  changeRevision _ d = d
 
 newtype ViewResultRow f k = ViewResultRow { id :: String, key :: k, value :: f }
 
@@ -485,19 +485,49 @@ couchdDBStatusCodes = fromFoldable
   , Tuple 500 "Internal server error. The request was invalid, either because the supplied JSON was invalid, or invalid information was supplied as part of the request."
   ]
 
+type CouchdbFunctionName = String
+
 -- | Throws an error pertinent to the statuscode if it is not one of the statusCodes that are acceptable.
 -- | Otherwise evaluates f.
--- onAccepted :: forall m a. MonadError Error m => StatusCode -> Array Int -> String -> m a -> m a
-onAccepted :: forall a m. MonadError Error m => StatusCode -> Array Int -> String -> m a -> m a
-onAccepted (StatusCode n) statusCodes fname f = case elemIndex n statusCodes of
-  Nothing -> handleError n mempty fname
-  otherwise -> f
+onAccepted :: forall a m f. MonadError Error m =>
+  (Either AJ.Error (Response a)) ->
+  Array StatusCode ->
+  CouchdbFunctionName ->
+  (Response a -> m f) ->
+  m f
+onAccepted = onAccepted_ handleCouchdbError
 
-onAccepted' :: forall a m. MonadError Error m => CouchdbStatusCodes -> StatusCode -> Array Int -> String -> m a -> m a
-onAccepted' specialCodes (StatusCode n) statusCodes fname f = case elemIndex n statusCodes of
+-- | As `onAccepted` but with specialised error messages (overriding existing StatusCodes with a custom message).
+onAccepted' :: forall a m f. MonadError Error m =>
+  CouchdbStatusCodes ->
+  (Either AJ.Error (Response a)) ->
+  Array StatusCode ->
+  CouchdbFunctionName ->
+  (Response a -> m f) ->
+  m f
+onAccepted' _ (Left e) _ fname _ = throwError $ error (fname <> ": error in call: " <> AJ.printError e)
+onAccepted' overriddenCodes (Right response) statusCodes fname onExpectedStatus = case elemIndex response.status statusCodes of
   Nothing -> do
-    handleError n specialCodes fname
-  otherwise -> f
+    handleError (unwrap response.status) overriddenCodes fname
+  _ -> onExpectedStatus response
+
+onAccepted_ :: forall a m f. MonadError Error m =>
+  (Response a -> CouchdbFunctionName -> m f) ->
+  (Either AJ.Error (Response a)) ->
+  Array StatusCode ->
+  CouchdbFunctionName ->
+  (Response a -> m f) ->
+  m f
+onAccepted_ _ (Left e) _ fname _ = throwError $ error (fname <> ": error in call: " <> AJ.printError e)
+onAccepted_ onOtherStatus (Right response) expectedStatusCodes fname onExpectedStatus = case elemIndex response.status expectedStatusCodes of
+  Nothing -> onOtherStatus response fname
+  _ -> onExpectedStatus response
+
+handleCouchdbError :: forall a m f. MonadError Error m =>
+  Response a ->
+  CouchdbFunctionName ->
+  m f
+handleCouchdbError response fname = handleError (unwrap response.status) empty fname
 
 handleError :: forall a m. MonadError Error m => Int -> CouchdbStatusCodes -> String -> m a
 handleError n statusCodes fname =
@@ -505,7 +535,7 @@ handleError n statusCodes fname =
     then throwError $ error "UNAUTHORIZED"
     else
       case lookup n statusCodes of
-        (Just m) -> throwError $ error $  "Failure in " <> fname <> ". " <> m
+        (Just m) -> throwError $ error $ "Failure in " <> fname <> ". " <> m
         Nothing ->
           case lookup n couchdDBStatusCodes of
             (Just m) -> throwError $ error $  "Failure in " <> fname <> ". " <> m
@@ -515,14 +545,19 @@ handleError n statusCodes fname =
 -- | while setting the _rev of the payload (the entity) to that of the envelope (the document as stored in Couchdb).
 -- | Throws an error when the result could not be decoded to the required type.
 -- | Applies the supplied function to the entity, but returns the entity itself.
-onCorrectCallAndResponse :: forall a m. MonadError Error m => Decode a => Revision a => String -> Either ResponseFormatError String -> (a -> m Unit) -> m a
-onCorrectCallAndResponse n (Left e) _ = throwError $ error (n <> ": error in call: " <> printResponseFormatError e)
-onCorrectCallAndResponse n (Right r) f = do
+onCorrectCallAndResponse :: forall a m.
+  MonadError Error m =>
+  Decode a =>
+  Revision a =>
+  CouchdbFunctionName ->
+  String ->
+  m a
+onCorrectCallAndResponse fname r = do
   (x :: Either MultipleErrors a) <- pure $ runExcept (decodeResource r)
   case x of
     (Left e) -> do
-      throwError $ error (n <> ": error in decoding result: " <> show e)
-    (Right result) -> f result *> pure result
+      throwError $ error (fname <> ": error in decoding result: " <> show e)
+    (Right result) -> pure result
   where
     -- Takes the _rev of the document (the 'outer' revision) before decoding
     -- and sets it in the _rev of the content (the inner revision).
@@ -539,7 +574,7 @@ escapeCouchdbDocumentName s = replaceAll (Pattern ":") (Replacement "%3A") (repl
 
 version :: forall m. MonadError Error m => Array ResponseHeader -> m (Maybe String)
 version headers =  case find (\rh -> toLower (name rh) == "etag") headers of
-  Nothing -> throwError $ error ("Perspectives.Instances.version: couchdb returns no ETag header holding a document version number")
+  Nothing -> throwError $  error ("Perspectives.Instances.version: couchdb returns no ETag header holding a document version number")
   (Just h) -> case runExcept $ decodeJSON (value h) of
-    Left e -> pure Nothing
+    Left _ -> pure Nothing
     Right v -> pure $ Just v

@@ -19,7 +19,7 @@
 
 -- END LICENSE
 
-module MainCouchdb (addAttachment, addAttachmentInDatabases) where
+module Main (addAttachment, addAttachmentInDatabases) where
 
 import Control.Promise (Promise, fromAff)
 import Data.MediaType (MediaType(..))
