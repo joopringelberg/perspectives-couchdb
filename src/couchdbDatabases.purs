@@ -250,7 +250,7 @@ setReplicationDocument rd@(ReplicationDocument{_id}) = ensureAuthentication do
   base <- getCouchdbBaseURL
   rq <- defaultPerspectRequest
   res <- liftAff $ AJ.request $ rq {method = Left PUT, url = (base <> "_replicator/" <> _id), content = Just $ RequestBody.json (encodeJson rd)}
-  liftAff $ onAccepted res [StatusCode 200, StatusCode 201, StatusCode 202] "setReplicationDocument" (\_ -> pure unit)
+  onAccepted res [StatusCode 200, StatusCode 201, StatusCode 202] "setReplicationDocument" (\_ -> pure unit)
 
 replicateContinuously :: forall f. String -> String -> String -> Maybe SelectorObject -> MonadCouchdb f Unit
 replicateContinuously name source target selector = do
@@ -416,7 +416,7 @@ retrieveDocumentVersion url = do
     (\_ _ -> pure Nothing)
     res
     [StatusCode 200, StatusCode 203]
-    "requestAuthentication_"
+    "retrieveDocumentVersion"
     (\response -> version response.headers)
 
 -----------------------------------------------------------
@@ -480,7 +480,7 @@ deleteDocument url version' = ensureAuthentication do
       res <- liftAff $ AJ.request $ rq {method = Left DELETE, url = (url <> "?rev=" <> rev) }
       -- pure $ isJust (elemIndex res.status [StatusCode 200, StatusCode 304])
       onAccepted_
-        (\_ _ -> pure true)
+        (\_ _ -> pure false)
         res
         [StatusCode 200, StatusCode 202]
         ("removeEntiteit(" <> url <> ")")
