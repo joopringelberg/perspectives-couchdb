@@ -11,3 +11,5 @@ The root directory contains a `package.json` file with a script `build`. To buil
 ```
 npm run build
 ```
+## Dependency management
+See [Publishing a new version](https://github.com/joopringelberg/perspectives-core/blob/master/technical%20readme.md#publishing-a-new-version) in the Perspectives Core (PDR) project.
