@@ -14,7 +14,7 @@ in  upstream
     , repo =
        "https://github.com/joopringelberg/purescript-avar-monadask.git"
     , version =
-        "v2.1.1"
+        "AVAR_MONADASK"
     }
   with affjax.repo = "https://github.com/joopringelberg/purescript-affjax.git"
-  with affjax.version = "v12.0.0-with-xhr-cookies"
+  with affjax.version = "AFFJAX"

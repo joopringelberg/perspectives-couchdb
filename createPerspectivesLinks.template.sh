@@ -10,19 +10,19 @@ cd .spago
 ##### AVAR-MONADASK #####
 cd avar-monadask/
 
-rm -Rf v2.1.1
+rm -Rf AVAR_MONADASK
 
-ln -s ../../../purescript-avar-monadask v2.1.1
+ln -s ../../../purescript-avar-monadask AVAR_MONADASK
 
 cd ..
 
 
-##### v12.0.0-with-xhr-cookies #####
+##### AFFJAX #####
 cd affjax
 
-rm -Rf v12.0.0-with-xhr-cookies
+rm -Rf AFFJAX
 
-ln -s ../../../purescript-affjax v12.0.0-with-xhr-cookies
+ln -s ../../../purescript-affjax AFFJAX
 
 cd ..
 
