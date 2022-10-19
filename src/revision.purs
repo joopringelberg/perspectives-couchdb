@@ -34,6 +34,7 @@ type Revision_ = Maybe String
 revision :: String -> Revision_
 revision = Just
 
+-- | Gets the OUTER _rev of the raw json representation.
 foreign import getRev_ :: Foreign -> Foreign
 
 getRev :: Foreign -> F (Maybe String)
