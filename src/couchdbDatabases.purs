@@ -261,6 +261,7 @@ replicateContinuously name source target selector = do
     Left _ -> pure unit
     Right auth -> setReplicationDocument (ReplicationDocument
         { _id: name
+        , _rev: Nothing
         , source: ReplicationEndpoint {url: source, headers: OBJ.singleton "Authorization" ("Basic " <> auth)}
         , target: ReplicationEndpoint {url: target, headers: OBJ.singleton "Authorization" ("Basic " <> auth)}
         , create_target: false

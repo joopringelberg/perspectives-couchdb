@@ -111,6 +111,7 @@ instance revisionDeleteCouchdbDocument :: Revision DeleteCouchdbDocument where
 -- }
 newtype ReplicationDocument = ReplicationDocument
   { _id :: String
+  , _rev :: Maybe String
   , source :: ReplicationEndpoint
   , target :: ReplicationEndpoint
   , create_target :: Boolean
@@ -529,6 +530,7 @@ handleCouchdbError :: forall a m f. MonadError Error m =>
   m f
 handleCouchdbError response fname = handleError (unwrap response.status) empty fname
 
+-- | Always throws an error.
 handleError :: forall a m. MonadError Error m => Int -> CouchdbStatusCodes -> String -> m a
 handleError n statusCodes fname =
   if n == 401
