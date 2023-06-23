@@ -1,6 +1,6 @@
 {
   "name": "perspectives-couchdb",
-  "version": "2.8.6",
+  "version": "2.8.7",
   "description": "Accessing Couchdb from Purescript",
   "private": true,
   "author": "Joop Ringelberg <joop.ringelberg@gmail.com>",
