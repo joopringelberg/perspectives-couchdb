@@ -27,7 +27,7 @@ import Affjax.ResponseHeader (ResponseHeader, name, value)
 import Affjax.StatusCode (StatusCode)
 import Control.Monad.Error.Class (class MonadError, throwError)
 import Control.Monad.Except (runExcept)
-import Data.Argonaut (class DecodeJson, class EncodeJson, decodeJson, encodeJson, fromObject, fromString, jsonSingletonObject)
+import Data.Argonaut (class DecodeJson, class EncodeJson, Json, decodeJson, encodeJson, fromObject, fromString, jsonSingletonObject)
 import Data.Array (elemIndex, find)
 import Data.Either (Either(..))
 import Data.Eq.Generic (genericEq)
@@ -57,6 +57,18 @@ type TerminatedURL = String
 type User = String
 type Password = String
 type DatabaseName = String
+
+-----------------------------------------------------------
+-- ARGONAUT JSON FROM SIMPLE.JSON
+-----------------------------------------------------------
+-- Produce a Argonaut.Core Json value, such as is compatible with AffJax.RequestBody.json.
+-- write (writeImpl) produces valid JSON, but it is typed as Foreign.
+toJson :: forall a. WriteForeign a => a -> Json
+toJson a = unsafeCoerce $ write a
+
+-- Use at your own risk! Only when it is known that a actually has the shape of a bona fide JSON structure.
+coerceToJson :: forall a. a -> Json
+coerceToJson = unsafeCoerce
 
 -----------------------------------------------------------
 -- PUTCOUCHDBDOCUMENT
@@ -94,6 +106,8 @@ derive instance newtypeDeleteCouchdbDocument :: Newtype DeleteCouchdbDocument _
 
 instance decodeDeleteCouchdbDocument :: Decode DeleteCouchdbDocument where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+
+derive newtype instance ReadForeign DeleteCouchdbDocument
 
 instance revisionDeleteCouchdbDocument :: Revision DeleteCouchdbDocument where
   rev = _.rev <<< unwrap
@@ -200,6 +214,8 @@ instance revisionDocWithAttachmentInfo :: Revision DocWithAttachmentInfo where
   rev _ = Nothing
   changeRevision _ d = d
 
+derive newtype instance WriteForeign DocWithAttachmentInfo
+derive newtype instance ReadForeign DocWithAttachmentInfo
 -----------------------------------------------------------
 -- SELECTOROBJECT
 -----------------------------------------------------------
@@ -316,6 +332,9 @@ instance decodeDesignDocument :: Decode DesignDocument where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 instance encodeDesignDocument :: Encode DesignDocument where
   encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+derive newtype instance WriteForeign DesignDocument
+derive newtype instance ReadForeign DesignDocument
+
 instance showDesignDocument :: Show DesignDocument where
   show = genericShow
 instance encodeJonDesignDocument :: EncodeJson DesignDocument where
@@ -352,6 +371,9 @@ instance decodeView :: Decode View where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
 instance encodeView :: Encode View where
   encode = genericEncode $ defaultOptions {unwrapSingleConstructors = true}
+derive newtype instance WriteForeign View
+derive newtype instance ReadForeign View
+
 instance eqView :: Eq View where
   eq = genericEq
 instance showView :: Show View where
@@ -400,11 +422,13 @@ instance revisionViewResult :: Revision (ViewResult f k) where
   changeRevision _ d = d
 
 newtype ViewResultRow f k = ViewResultRow { id :: String, key :: k, value :: f }
+derive newtype instance (ReadForeign k, ReadForeign f) => ReadForeign (ViewResultRow f k)
 
 derive instance genericViewResult :: Generic (ViewResult f k) _
 derive instance newtypeViewResult :: Newtype (ViewResult f k) _
 instance decodeViewResult :: (Decode f, Decode k) => Decode (ViewResult f k) where
   decode = genericDecode $ defaultOptions {unwrapSingleConstructors = true}
+derive newtype instance (ReadForeign k, ReadForeign f) => ReadForeign (ViewResult f k)
 
 derive instance genericViewResultRow :: Generic (ViewResultRow f k) _
 derive instance newtypeViewResultRow :: Newtype (ViewResultRow f k) _
@@ -555,6 +579,7 @@ onCorrectCallAndResponse :: forall a m.
   String ->
   m a
 onCorrectCallAndResponse fname r = do
+  -- TODO. Dit gold voor generic encoding maar geldt niet langer omdat we nu Simple-JSON gebruiken.
   (x :: Either MultipleErrors a) <- pure $ runExcept (decodeResource r)
   case x of
     (Left e) -> do
