@@ -201,7 +201,7 @@ type AttachmentInfo = OBJ.Object AttachmentRecord
 
 newtype DocWithAttachmentInfo = DocWithAttachmentInfo DocWithAttachmentInfoR
 
-type DocWithAttachmentInfoR = {_attachments :: AttachmentInfo}
+type DocWithAttachmentInfoR = {_attachments :: Maybe AttachmentInfo}
 
 instance showDocWithAttachmentInfo :: Show DocWithAttachmentInfo where
   show (DocWithAttachmentInfo r) = show r
@@ -410,6 +410,17 @@ instance encodeJonView :: EncodeJson View where
 --     ],
 --     "total_rows": 3
 -- }
+
+newtype ViewDocResult f k = ViewDocResult
+  { offset :: Int
+  , rows :: Array (ViewDocResultRow f k)
+  , total_rows :: Int
+  }
+derive newtype instance (ReadForeign k, ReadForeign f) => ReadForeign (ViewDocResult f k)
+
+newtype ViewDocResultRow f k = ViewDocResultRow { id :: String, key :: k, doc :: f }
+derive newtype instance (ReadForeign k, ReadForeign f) => ReadForeign (ViewDocResultRow f k)
+
 
 newtype ViewResult f k = ViewResult
   { offset :: Int
