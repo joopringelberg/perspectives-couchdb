@@ -5,7 +5,7 @@
 # * createPerspectivesLinks.sh
 # * package.json
 
-AVAR_MONADASK=v2.1.1
+AVAR_MONADASK=v2.2.0
 AFFJAX=v12.0.0-with-xhr-cookies
 
 sed "s/AVAR_MONADASK/${AVAR_MONADASK}/g;\

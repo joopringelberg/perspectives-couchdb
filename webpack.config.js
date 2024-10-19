@@ -20,6 +20,7 @@ module.exports = {
       commonjs2: 'perspectives-proxy',
       amd: 'perspectives-proxy',
       root: "perspectivesProxy"
-    }
+    },
+    "eventsource": 'commonjs eventsource'
   }
 };

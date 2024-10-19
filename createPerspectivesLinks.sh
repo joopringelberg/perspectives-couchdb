@@ -10,9 +10,9 @@ cd .spago
 ##### AVAR-MONADASK #####
 cd avar-monadask/
 
-rm -Rf v2.1.1
+rm -Rf v2.2.0
 
-ln -s ../../../purescript-avar-monadask v2.1.1
+ln -s ../../../purescript-avar-monadask v2.2.0
 
 cd ..
 
