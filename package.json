@@ -1,6 +1,6 @@
 {
   "name": "perspectives-couchdb",
-  "version": "2.9.1",
+  "version": "2.9.3",
   "description": "Accessing Couchdb from Purescript",
   "private": true,
   "author": "Joop Ringelberg <joop.ringelberg@gmail.com>",
@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "webpack": "^5.95.0",
-    "webpack-cli": "^5.1.4"
+    "webpack-cli": "^5.1.4",
+    "perspectives-packages": "^1.0.1"
   }
 }
